@@ -329,6 +329,20 @@ export class CitationDetector {
     this.lastY = me.clientY;
   };
 
+  /**
+   * Returns true if the given anchor resolves to a known bibliography entry in the
+   * current index, using the same href + coordinate fallback as previewCurrent().
+   * When the index isn't ready yet, returns true (optimistic — we don't filter yet).
+   */
+  private isKnownReference(anchor: HTMLElement, clientX: number, clientY: number): boolean {
+    if (!this.index) return true; // index still building — don't filter prematurely
+    const href = anchor.getAttribute("href") ?? "";
+    if (findReferenceByHref(this.index, href)) return true;
+    const hit = resolvePageHit(anchor, clientX, clientY);
+    if (hit && findReferenceAt(this.index, hit.pageNumber, hit.normX, hit.normY)) return true;
+    return false;
+  }
+
   private handlePointerOver = (e: Event): void => {
     const target = e.target as Element | null;
     if (!target) return;
@@ -338,6 +352,9 @@ export class CitationDetector {
     const me = e as PointerEvent;
     this.lastX = me.clientX;
     this.lastY = me.clientY;
+
+    if (!this.isKnownReference(anchor, me.clientX, me.clientY)) return;
+
     this.currentAnchor = anchor;
     this.cb.showTooltip(anchor.getBoundingClientRect());
   };
