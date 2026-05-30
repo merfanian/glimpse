@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseReference, normalizeTitle } from "@shared/refparse";
+import { parseReference, normalizeTitle, isBibliographyEntry } from "@shared/refparse";
 
 describe("normalizeTitle", () => {
   it("lowercases and strips punctuation", () => {
@@ -123,5 +123,53 @@ describe("parseReference — realistic examples", () => {
     const ref = parseReference(raw);
     expect(ref.year).toBe(2024);
     expect(ref.title).toBeTruthy();
+  });
+});
+
+describe("isBibliographyEntry", () => {
+  it("accepts a citation dest key with a year", () => {
+    const ref = parseReference("Smith, J. (2023). A great paper. Journal of Things.");
+    expect(isBibliographyEntry("cite.smith2023", ref)).toBe(true);
+  });
+
+  it("accepts a citation dest key with a DOI", () => {
+    const ref = parseReference("Jones, A. A paper. doi:10.1145/12345.67890.");
+    expect(isBibliographyEntry("bib.5", ref)).toBe(true);
+  });
+
+  it("rejects 'section.*' dest keys", () => {
+    const ref = parseReference("2. Related Work In this section we review...");
+    expect(isBibliographyEntry("section.2", ref)).toBe(false);
+  });
+
+  it("rejects 'figure.*' dest keys", () => {
+    const ref = parseReference("Figure 3: Architecture overview.");
+    expect(isBibliographyEntry("figure.3", ref)).toBe(false);
+  });
+
+  it("rejects 'table.*' dest keys", () => {
+    const ref = parseReference("Table 1: Quantitative results on benchmark.");
+    expect(isBibliographyEntry("table.1", ref)).toBe(false);
+  });
+
+  it("rejects 'algorithm.*' dest keys", () => {
+    const ref = parseReference("Algorithm 1: Training procedure.");
+    expect(isBibliographyEntry("algorithm.1", ref)).toBe(false);
+  });
+
+  it("rejects 'appendix.*' dest keys", () => {
+    const ref = parseReference("A. Proofs of theorems.");
+    expect(isBibliographyEntry("appendix.A", ref)).toBe(false);
+  });
+
+  it("rejects short text with no year, DOI, or arXiv even with unknown dest key", () => {
+    const ref = parseReference("Overview of the proposed method.");
+    expect(isBibliographyEntry("dest.xyz", ref)).toBe(false);
+  });
+
+  it("section body mentioning year is still rejected if dest key is 'section.*'", () => {
+    // Even if a section paragraph happens to contain a year, the dest key rejects it.
+    const ref = parseReference("3. Experiments In 2023, Smith et al. showed that...");
+    expect(isBibliographyEntry("section.3", ref)).toBe(false);
   });
 });
