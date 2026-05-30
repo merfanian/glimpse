@@ -477,6 +477,12 @@ function PdfFirefoxRenderer({ bytes }: { bytes: Uint8Array }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<FirefoxRenderState>({ kind: "loading" });
   const revokeRef = useRef<string[]>([]);
+  // Keep a ref so the stable renderAtCurrentWidth callback always sees the latest bytes.
+  const bytesRef = useRef(bytes);
+  bytesRef.current = bytes;
+  // Prevent concurrent renders; queue one re-render if a resize arrives while rendering.
+  const isRenderingRef = useRef(false);
+  const rerenderQueuedRef = useRef(false);
 
   // Revoke all blob URLs on unmount.
   useEffect(() => {
@@ -485,35 +491,50 @@ function PdfFirefoxRenderer({ bytes }: { bytes: Uint8Array }) {
     };
   }, []);
 
+  // Stable callback — reads container width at call time, like Chrome's renderAll().
+  const renderAtCurrentWidth = useCallback(async () => {
+    if (isRenderingRef.current) {
+      rerenderQueuedRef.current = true;
+      return;
+    }
+    isRenderingRef.current = true;
+    const availableWidth = Math.max((containerRef.current?.clientWidth ?? 0) - 8, 300) || 680;
+    try {
+      const pages = await renderPdfPagesInMainWorld(bytesRef.current, availableWidth);
+      revokeRef.current.forEach(u => { try { URL.revokeObjectURL(u); } catch { /* ignore */ } });
+      revokeRef.current = pages.pageUrls;
+      setState({ kind: "ready", pages });
+    } catch (err) {
+      setState({ kind: "error", message: (err as Error).message ?? String(err) });
+    } finally {
+      isRenderingRef.current = false;
+      if (rerenderQueuedRef.current) {
+        rerenderQueuedRef.current = false;
+        void renderAtCurrentWidth();
+      }
+    }
+  }, []); // stable — only uses refs
+
+  // Re-render from scratch when bytes change (new paper selected).
   useEffect(() => {
-    let cancelled = false;
     setState({ kind: "loading" });
-    // Revoke previous blob URLs.
     revokeRef.current.forEach(u => { try { URL.revokeObjectURL(u); } catch { /* ignore */ } });
     revokeRef.current = [];
+    void renderAtCurrentWidth();
+  }, [bytes, renderAtCurrentWidth]);
 
-    // Read container width after layout; fall back to a reasonable default if not yet laid out.
-    const availableWidth = Math.max(
-      (containerRef.current?.clientWidth ?? 0) - 8,
-      300,
-    ) || 680;
-
-    renderPdfPagesInMainWorld(bytes, availableWidth)
-      .then((pages) => {
-        if (cancelled) {
-          pages.pageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch { /* ignore */ } });
-          return;
-        }
-        revokeRef.current = pages.pageUrls;
-        setState({ kind: "ready", pages });
-      })
-      .catch((err: unknown) => {
-        if (!cancelled)
-          setState({ kind: "error", message: (err as Error).message ?? String(err) });
-      });
-
-    return () => { cancelled = true; };
-  }, [bytes]);
+  // Re-render when the panel is resized (mirrors Chrome's ResizeObserver logic).
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let timer: number;
+    const ro = new ResizeObserver(() => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => void renderAtCurrentWidth(), 150);
+    });
+    ro.observe(container);
+    return () => { ro.disconnect(); clearTimeout(timer); };
+  }, [renderAtCurrentWidth]);
 
   return (
     <div class="rp-pdf-canvas-container" ref={containerRef}>
