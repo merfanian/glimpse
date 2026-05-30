@@ -1,0 +1,348 @@
+/* Styles for the preview panel. Loaded inside the panel's shadow root. */
+:host,
+.rp-container {
+  all: initial;
+}
+
+.rp-panel {
+  position: fixed;
+  top: 5vh;
+  right: 24px;
+  width: clamp(420px, 35vw, 900px);
+  height: clamp(400px, 80vh, 1000px);
+  min-width: 360px;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  color: #1f2328;
+  border: 1px solid #d0d7de;
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  z-index: 2147483647;
+}
+
+/* ── Header ───────────────────────────────────────────── */
+.rp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f6f8fa;
+  border-bottom: 1px solid #d0d7de;
+  cursor: move;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.rp-header-title {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-close {
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  cursor: pointer;
+  color: #57606a;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.rp-close:hover {
+  background: #eaeef2;
+}
+
+/* ── Body ─────────────────────────────────────────────── */
+.rp-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.rp-status {
+  padding: 16px;
+  color: #57606a;
+}
+
+.rp-error {
+  color: #cf222e;
+}
+
+.rp-error-detail {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.rp-error-window {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.rp-error-summary {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.rp-error-message {
+  margin: 0;
+  padding: 10px;
+  background: #fff8f8;
+  border: 1px solid #ffebe9;
+  border-radius: 6px;
+  color: #82071e;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.rp-raw {
+  margin-top: 8px;
+  padding: 8px;
+  background: #f6f8fa;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #57606a;
+  word-break: break-word;
+}
+
+/* ── Confidence banner ────────────────────────────────── */
+.rp-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-bottom: 1px solid #eaeef2;
+  background: #f6f8fa;
+  flex-shrink: 0;
+}
+
+.rp-banner-warn {
+  background: #fff8c5;
+  border-bottom-color: #eac54f;
+}
+
+.rp-conf {
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.rp-conf-high { color: #1a7f37; }
+.rp-conf-med  { color: #9a6700; }
+.rp-conf-low  { color: #cf222e; }
+
+.rp-link-btn {
+  border: none;
+  background: transparent;
+  color: #1f6feb;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+  margin-left: auto;
+}
+
+.rp-link-btn:hover { text-decoration: underline; }
+
+/* ── Alternatives list ────────────────────────────────── */
+.rp-alts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 140px;
+  overflow: auto;
+  border-bottom: 1px solid #eaeef2;
+  flex-shrink: 0;
+}
+
+.rp-alt {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.rp-alt:hover { background: #f6f8fa; }
+.rp-alt-active { background: #ddf4ff; }
+.rp-alt-conf { font-weight: 600; color: #57606a; }
+.rp-alt-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rp-alt-meta { color: #8c959f; }
+
+/* ── Abstract view ────────────────────────────────────── */
+.rp-abstract-view {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rp-paper-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #1f2328;
+}
+
+.rp-paper-meta {
+  margin: 0;
+  font-size: 12px;
+  color: #57606a;
+  line-height: 1.4;
+}
+
+.rp-abstract-body {
+  margin-top: 8px;
+  flex: 1;
+}
+
+.rp-abstract-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1f2328;
+  white-space: pre-wrap;
+}
+
+.rp-muted {
+  color: #8c959f;
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* ── PDF view ─────────────────────────────────────────── */
+.rp-pdf-view {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #525659;
+  min-height: 0;
+}
+
+.rp-pdf-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: #d0d7de;
+  font-size: 13px;
+}
+
+/* Canvas-based PDF renderer */
+.rp-pdf-canvas-container {
+  flex: 1;
+  overflow-y: auto;
+  background: #525659;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.rp-pdf-page {
+  display: block;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  max-width: 100%;
+  background: white; /* fallback so transparent canvas never appears black */
+}
+
+/* ── Footer ───────────────────────────────────────────── */
+.rp-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-top: 1px solid #d0d7de;
+  background: #f6f8fa;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Custom resize grip in bottom-left corner */
+.rp-resize-grip {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: sw-resize;
+  z-index: 1;
+  opacity: 0.4;
+}
+
+.rp-resize-grip::before,
+.rp-resize-grip::after {
+  content: "";
+  position: absolute;
+  background: #57606a;
+  border-radius: 1px;
+}
+
+.rp-resize-grip::before {
+  left: 3px; bottom: 6px;
+  width: 10px; height: 2px;
+  transform: rotate(-45deg);
+  transform-origin: left center;
+}
+
+.rp-resize-grip::after {
+  left: 3px; bottom: 2px;
+  width: 6px; height: 2px;
+  transform: rotate(-45deg);
+  transform-origin: left center;
+}
+
+.rp-resize-grip:hover {
+  opacity: 0.8;
+}
+
+.rp-footer-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 20px; /* leave room for grip */
+  justify-content: flex-end;
+  flex: 1;
+}
+
+.rp-btn {
+  border: 1px solid transparent;
+  background: #1f6feb;
+  color: #fff;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rp-btn:hover:not(:disabled) { background: #1a5fd0; }
+.rp-btn:disabled { opacity: 0.5; cursor: default; }
+
+.rp-btn-secondary {
+  background: #f6f8fa;
+  color: #1f2328;
+  border-color: #d0d7de;
+}
+
+.rp-btn-secondary:hover:not(:disabled) { background: #eaeef2; }

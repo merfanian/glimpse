@@ -1,0 +1,28 @@
+{
+  "name": "reference-previewer",
+  "version": "0.1.0",
+  "description": "Hover a citation in a PDF and preview the cited paper (PDF or abstract) in a floating in-tab panel.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/generate-icons.mjs && node scripts/build.mjs",
+    "build:chrome": "node scripts/generate-icons.mjs && node scripts/build.mjs --target=chrome",
+    "build:firefox": "node scripts/generate-icons.mjs && node scripts/build.mjs --target=firefox",
+    "watch": "node scripts/generate-icons.mjs && node scripts/build.mjs --watch --target=chrome",
+    "typecheck": "tsc --noEmit",
+    "package": "npm run build:chrome && npm run build:firefox && node scripts/package.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^4.6.82",
+    "preact": "^10.23.2"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.270",
+    "esbuild": "^0.23.1",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.9"
+  }
+}
