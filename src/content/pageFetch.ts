@@ -19,7 +19,7 @@
 // where there are NO Xray restrictions. We bundle pdf.js into this script for Firefox
 // (DCE eliminates it for Chrome where the content-script approach works fine).
 
-import { parseReference } from "@shared/refparse";
+import { parseReference, isBibliographyEntry } from "@shared/refparse";
 import type { ParsedReference } from "@shared/types";
 
 // Firefox-only: set up pdfjs with a fake worker in the MAIN world (page context).
@@ -246,8 +246,14 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
           const raw = await extractEntryText(doc, resolved.pageIndex, resolved.top);
           if (!raw || raw.length < 8) continue;
           reference = parseReference(raw);
+          // Cache even rejected entries to avoid re-extracting text for subsequent
+          // links pointing to the same destination.
           destCache.set(destKey, reference);
         }
+
+        // Filter non-bibliography destinations (sections, figures, tables, etc.)
+        // using dest-key prefix + content signals (year/DOI/arXivId).
+        if (!isBibliographyEntry(destKey, reference)) continue;
 
         entries.push({ srcPage: p, rect: rect as [number, number, number, number], destKey, reference });
         if (!byDest.has(destKey)) byDest.set(destKey, reference);

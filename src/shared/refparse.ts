@@ -83,6 +83,23 @@ export function parseReference(raw: string): ParsedReference {
   return ref;
 }
 
+/**
+ * Returns true if the raw extracted text looks like a bibliography entry.
+ *
+ * Filters out section headings, figure/table/algorithm captions, theorem
+ * environments and other link destinations that are not bibliography references.
+ *
+ * Rules (all must pass):
+ *  1. Length ≥ 40: real entries are always multi-sentence; headings are short.
+ *  2. Doesn't start with a known non-bibliography keyword (Figure, Table, …).
+ *  3. Contains a year (19xx/20xx): virtually all scientific bibliography entries do.
+ */
+export function looksLikeBibEntry(raw: string): boolean {
+  if (raw.length < 40) return false;
+  if (/^(figure|fig\.|table|tab\.|algorithm|alg\.|theorem|thm\.|lemma|lem\.|corollary|cor\.|proposition|prop\.|definition|def\.|remark|rem\.|proof|example|appendix|chapter|section)\s/i.test(raw)) return false;
+  return /\b(19|20)\d{2}\b/.test(raw);
+}
+
 /** Normalize a title for fuzzy comparison. */
 export function normalizeTitle(title: string): string {
   return title
@@ -91,4 +108,35 @@ export function normalizeTitle(title: string): string {
     .replace(/[^a-z0-9 ]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Returns true if (destKey, parsedRef) looks like a bibliography entry rather
+ * than a section / figure / table / equation / theorem / appendix link.
+ *
+ * Two independent signals are used:
+ *
+ * 1. Destination-name prefix — hyperref encodes the link type in the name
+ *    (e.g. "section.2", "figure.3", "table.1", "equation.4"). Matching one of
+ *    these known non-bibliography prefixes immediately rejects the entry.
+ *
+ * 2. Content signal — bibliography entries almost always carry a publication
+ *    year (1900–2099), a DOI, or an arXiv ID. Section headings and captions
+ *    rarely contain any of these (and when they do, signal 1 is the safety net).
+ *
+ * Both signals must agree to accept a destination as a bibliography entry:
+ * the name must NOT be a known non-bibliography prefix AND the parsed reference
+ * must contain at least one of year / DOI / arXiv.
+ */
+export function isBibliographyEntry(destKey: string, ref: ParsedReference): boolean {
+  // --- Signal 1: destination key name ---
+  // hyperref names follow the pattern "<type>.<counter>" (all lowercase).
+  // Reject the common non-bibliography types.
+  const k = destKey.toLowerCase();
+  const NON_BIB_PREFIX =
+    /^(section|subsection|subsubsection|figure|table|algorithm|theorem|lemma|corollary|proposition|definition|remark|example|appendix|equation|listing|page|toc|lof|lot|doc|fig\b|tab\b|alg\b|thm\b|lem\b|cor\b|prop\b|defn?\b|rem\b|ex\b)/;
+  if (NON_BIB_PREFIX.test(k)) return false;
+
+  // --- Signal 2: content ---
+  return !!(ref.doi || ref.arxivId || ref.year);
 }

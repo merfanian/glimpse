@@ -2,7 +2,7 @@
 // that a hovered internal (hyperref) citation link points to.
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { parseReference } from "@shared/refparse";
+import { parseReference, isBibliographyEntry } from "@shared/refparse";
 import type { ParsedReference } from "@shared/types";
 import { sendMessage } from "@shared/messages";
 import type { FetchPdfRequest, FetchPdfResponse } from "@shared/messages";
@@ -487,7 +487,9 @@ export async function buildReferenceIndex(doc: PDFDocumentProxy): Promise<Refere
     const pageH = pageSizes.get(r.pageIndex + 1)?.height ?? 0;
     const raw = extractTextFromItems(items, r.top, pageH);
     if (!raw || raw.length < 8) continue;
-    destCache.set(destKey, parseReference(raw));
+    const ref = parseReference(raw);
+    if (!isBibliographyEntry(destKey, ref)) continue;
+    destCache.set(destKey, ref);
   }
 
   // Phase 5: build entries array from cached results.
