@@ -127,7 +127,7 @@ describe("parseReference — realistic examples", () => {
 });
 
 describe("isBibliographyEntry", () => {
-  it("accepts a citation dest key with a year", () => {
+  it("accepts a citation dest key with a year in parentheses", () => {
     const ref = parseReference("Smith, J. (2023). A great paper. Journal of Things.");
     expect(isBibliographyEntry("cite.smith2023", ref)).toBe(true);
   });
@@ -135,6 +135,17 @@ describe("isBibliographyEntry", () => {
   it("accepts a citation dest key with a DOI", () => {
     const ref = parseReference("Jones, A. A paper. doi:10.1145/12345.67890.");
     expect(isBibliographyEntry("bib.5", ref)).toBe(true);
+  });
+
+  it("accepts IEEE-style numbered entry [N]", () => {
+    const ref = parseReference("[5] J. Smith, \"Great Paper,\" in Proc. CVPR, 2023, pp. 1-10.");
+    expect(isBibliographyEntry("bib.5", ref)).toBe(true);
+  });
+
+  it("accepts author-year entry where authors are detected", () => {
+    // "Smith, J." — Smith followed by comma → guessAuthors detects it
+    const ref = parseReference("Smith, J. and Jones, A. (2023). A collaborative work. Nature.");
+    expect(isBibliographyEntry("r.smith23", ref)).toBe(true);
   });
 
   it("rejects 'section.*' dest keys", () => {
@@ -171,5 +182,16 @@ describe("isBibliographyEntry", () => {
     // Even if a section paragraph happens to contain a year, the dest key rejects it.
     const ref = parseReference("3. Experiments In 2023, Smith et al. showed that...");
     expect(isBibliographyEntry("section.3", ref)).toBe(false);
+  });
+
+  it("rejects section body text mentioning year when dest key is opaque (non-hyperref PDF)", () => {
+    // For non-hyperref PDFs (opaque/array dest keys), body text that merely mentions
+    // a year should NOT be accepted — requires year in parens, authors, or [N] marker.
+    const raw =
+      "3. Experiments In 2023, researchers evaluated the proposed approach on five datasets. " +
+      "Results demonstrate significant improvements over prior work.";
+    const ref = parseReference(raw);
+    // destKey is an opaque array key — no prefix match
+    expect(isBibliographyEntry('["num",42,"XYZ",72,650,0]', ref)).toBe(false);
   });
 });

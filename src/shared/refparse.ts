@@ -111,32 +111,71 @@ export function normalizeTitle(title: string): string {
 }
 
 /**
+ * The set of hyperref-style destination-key prefixes that indicate a
+ * NON-bibliography destination (sections, figures, tables, equations, …).
+ *
+ * Exported so callers can pre-filter link hrefs before the full index is built.
+ */
+const NON_BIB_PREFIX =
+  /^(section|subsection|subsubsection|figure|table|algorithm|theorem|lemma|corollary|proposition|definition|remark|example|appendix|equation|listing|page|toc|lof|lot|doc|fig\b|tab\b|alg\b|thm\b|lem\b|cor\b|prop\b|defn?\b|rem\b|ex\b)/;
+
+/**
+ * Returns true if the destination key is recognisably NOT a bibliography entry
+ * (e.g. "section.2", "figure.3", "table.1", "equation.4" — hyperref standard).
+ *
+ * Useful for fast pre-filtering of link hrefs even before the reference index
+ * is fully built.
+ */
+export function isNonBibliographyDestKey(destKey: string): boolean {
+  return NON_BIB_PREFIX.test(destKey.toLowerCase());
+}
+
+/**
  * Returns true if (destKey, parsedRef) looks like a bibliography entry rather
  * than a section / figure / table / equation / theorem / appendix link.
  *
- * Two independent signals are used:
+ * Three independent signals are applied in order:
  *
  * 1. Destination-name prefix — hyperref encodes the link type in the name
- *    (e.g. "section.2", "figure.3", "table.1", "equation.4"). Matching one of
- *    these known non-bibliography prefixes immediately rejects the entry.
+ *    (e.g. "section.2", "figure.3", "table.1"). Matching a known non-bibliography
+ *    prefix immediately rejects the entry.
  *
- * 2. Content signal — bibliography entries almost always carry a publication
- *    year (1900–2099), a DOI, or an arXiv ID. Section headings and captions
- *    rarely contain any of these (and when they do, signal 1 is the safety net).
+ * 2. Raw-text content pre-filter — if the extracted text is very short (< 40 chars)
+ *    or starts with a heading-style keyword, it is not a bibliography entry.
  *
- * Both signals must agree to accept a destination as a bibliography entry:
- * the name must NOT be a known non-bibliography prefix AND the parsed reference
- * must contain at least one of year / DOI / arXiv.
+ * 3. Structured content signal — bibliography entries almost always carry a DOI,
+ *    an arXiv ID, or a year that appears in a bibliography-style context (in
+ *    parentheses, or accompanied by detected author names). Section body text that
+ *    merely *mentions* a year in passing will not have the accompanying structure.
  */
 export function isBibliographyEntry(destKey: string, ref: ParsedReference): boolean {
-  // --- Signal 1: destination key name ---
-  // hyperref names follow the pattern "<type>.<counter>" (all lowercase).
-  // Reject the common non-bibliography types.
-  const k = destKey.toLowerCase();
-  const NON_BIB_PREFIX =
-    /^(section|subsection|subsubsection|figure|table|algorithm|theorem|lemma|corollary|proposition|definition|remark|example|appendix|equation|listing|page|toc|lof|lot|doc|fig\b|tab\b|alg\b|thm\b|lem\b|cor\b|prop\b|defn?\b|rem\b|ex\b)/;
-  if (NON_BIB_PREFIX.test(k)) return false;
+  // Signal 1: destination key prefix
+  if (isNonBibliographyDestKey(destKey)) return false;
 
-  // --- Signal 2: content ---
-  return !!(ref.doi || ref.arxivId || ref.year);
+  // Signal 2: raw text pre-filter (catches non-hyperref PDFs where the dest key
+  // is an opaque JSON string and we must rely on text content alone)
+  const raw = ref.raw.trimStart();
+  if (raw.length < 40) return false;
+  // Starts with a heading keyword + optional number — definitely not bibliography
+  if (/^(figure|fig\.|table|tab\.|algorithm|alg\.|theorem|thm\.|section|sec\.|appendix|proof|lemma|lem\.|corollary|cor\.|proposition|prop\.|definition|def\.|remark|rem\.|example)\b/i.test(raw)) return false;
+
+  // Signal 3: definitive identifiers — accept immediately
+  if (ref.doi || ref.arxivId) return true;
+
+  // Signal 3 (continued): year is common in body text, so require it to appear in
+  // a bibliography-style context: in parentheses "(YYYY)" (APA/MLA/Nature style),
+  // OR accompanied by detected author names, OR at the end of an entry (NeurIPS/
+  // arXiv style — "..., YYYY."), OR the text starts with a numbered entry marker.
+  if (ref.year) {
+    // Year in parentheses: "(2023)" or "(2023a)" — typical of most bib styles
+    if (/\((?:19|20)\d{2}[a-z]?\)/.test(raw)) return true;
+    // Parsed authors found: author-year entries
+    if (ref.authors && ref.authors.length > 0) return true;
+    // Starts with a numbered entry marker: "[5]" or "(5)" — numbered bib styles
+    if (/^(\[\d+\]|\(\d+\))\s/.test(raw)) return true;
+    // Year appears at the very end of the entry (e.g. "..., 2024." or "..., 2024")
+    if (/,\s*(?:19|20)\d{2}[a-z]?\s*\.?\s*$/.test(raw)) return true;
+  }
+
+  return false;
 }

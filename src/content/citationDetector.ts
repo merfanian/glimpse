@@ -11,6 +11,7 @@ import {
 import type { ParsedReference } from "@shared/types";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { log, warn } from "@shared/debug";
+import { isNonBibliographyDestKey } from "@shared/refparse";
 
 export type Environment = "overleaf" | "pdfjs" | null;
 
@@ -332,11 +333,28 @@ export class CitationDetector {
   /**
    * Returns true if the given anchor resolves to a known bibliography entry in the
    * current index, using the same href + coordinate fallback as previewCurrent().
-   * When the index isn't ready yet, returns true (optimistic — we don't filter yet).
+   * When the index isn't ready yet, returns true (optimistic — we don't filter yet),
+   * UNLESS the href can be immediately identified as a non-bibliography destination
+   * from its dest-key prefix alone (section.*, figure.*, table.*, …).
    */
   private isKnownReference(anchor: HTMLElement, clientX: number, clientY: number): boolean {
-    if (!this.index) return true; // index still building — don't filter prematurely
     const href = anchor.getAttribute("href") ?? "";
+
+    // Fast pre-filter: reject links whose href fragment is a hyperref-style
+    // non-bibliography destination key (section.N, figure.N, table.N, …).
+    // This works without the index being ready and catches the most common cases.
+    if (href.startsWith("#")) {
+      const fragment = (() => {
+        try {
+          return decodeURIComponent(href.slice(1));
+        } catch {
+          return href.slice(1);
+        }
+      })();
+      if (isNonBibliographyDestKey(fragment)) return false;
+    }
+
+    if (!this.index) return true; // index still building — allow remaining links
     if (findReferenceByHref(this.index, href)) return true;
     const hit = resolvePageHit(anchor, clientX, clientY);
     if (hit && findReferenceAt(this.index, hit.pageNumber, hit.normX, hit.normY)) return true;
