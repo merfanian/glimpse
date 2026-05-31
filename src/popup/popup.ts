@@ -1,4 +1,6 @@
 // Popup script: detect current tab PDF, handle file picker and drag-and-drop.
+import { idbPutPdf } from "@shared/idb";
+
 declare const __EXT_VERSION__: string;
 
 const PDF_URL_RE = /\.pdf($|[?#])/i;
@@ -19,7 +21,7 @@ function clearStatus(): void {
   el("status-bar").classList.add("hidden");
 }
 
-/** Send file bytes to the background, get back a key, open viewer. */
+/** Store file in IndexedDB, get back a key, open viewer in a new tab. */
 async function openFileInViewer(file: File): Promise<void> {
   setStatus("Reading file…", false);
   const buf = await file.arrayBuffer();
@@ -30,23 +32,9 @@ async function openFileInViewer(file: File): Promise<void> {
     return;
   }
 
-  // Convert to base64 in chunks to avoid call-stack overflow on large files
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  const data = btoa(binary);
-
   setStatus("Opening…", false);
-  const resp = await chrome.runtime.sendMessage({ type: "storeLocalPdf", data, name: file.name });
-  if (!resp?.ok) {
-    setStatus(resp?.error ?? "Failed to store PDF");
-    return;
-  }
-
-  const viewerUrl = chrome.runtime.getURL(`viewer.html?localKey=${resp.key as string}`);
+  const key = await idbPutPdf(new Uint8Array(buf), file.name);
+  const viewerUrl = chrome.runtime.getURL(`viewer.html?localKey=${key}`);
   await chrome.tabs.create({ url: viewerUrl });
   window.close();
 }

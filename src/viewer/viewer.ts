@@ -4,6 +4,7 @@ import * as pdfjs from "pdfjs-dist";
 import { EventBus, PDFViewer, PDFLinkService } from "pdfjs-dist/web/pdf_viewer.mjs";
 import { startDetection } from "../content/start";
 import { log, errorLog } from "@shared/debug";
+import { idbPopPdf } from "@shared/idb";
 
 pdfjs.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.js");
 
@@ -90,42 +91,14 @@ async function main(): Promise<void> {
   }
 
   // ── Full viewer mode ──
-
-  // Check if this was opened from the popup via a stored local PDF key
   const localKey = new URLSearchParams(location.search).get("localKey");
-  if (localKey) {
-    const titleEl = document.getElementById("doc-title");
-    setStatus("Loading…");
-    try {
-      const resp = await chrome.runtime.sendMessage({ type: "getLocalPdf", key: localKey });
-      if (!resp?.ok) throw new Error(resp?.error ?? "PDF not found");
-      const { data, name } = resp.pdf as { data: string; name: string };
-      if (titleEl) titleEl.textContent = name;
-      document.title = `${name} — Glimpse`;
-      const binary = atob(data);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const doc = await pdfjs.getDocument({ data: bytes, disableRange: true, disableStream: true }).promise;
-      pdfViewer.setDocument(doc);
-      linkService.setDocument(doc, null);
-      setStatus(`${doc.numPages} page${doc.numPages === 1 ? "" : "s"}`);
-      startDetection("pdfjs", doc);
-    } catch (err) {
-      errorLog("viewer failed to load local PDF", err);
-      setStatus(`Failed to load PDF: ${String((err as Error)?.message ?? err)}`);
-    }
-    return;
-  }
-
   const fileUrl = getFileParam();
   const titleEl = document.getElementById("doc-title");
 
-  if (!fileUrl) {
+  if (!localKey && !fileUrl) {
     setStatus("No PDF specified. Open a PDF via the Glimpse toolbar button.");
     return;
   }
-  if (titleEl) titleEl.textContent = decodeURIComponent(fileUrl.split("/").pop() || "PDF");
-  document.title = `${titleEl?.textContent ?? "PDF"} — Glimpse`;
 
   // ── Toolbar controls ──
   const btnPrev = document.getElementById("btn-prev") as HTMLButtonElement;
@@ -263,10 +236,6 @@ async function main(): Promise<void> {
     updatePageUI(1, pdfViewer.pagesCount);
   });
 
-  // ── PDF loading ──
-  setStatus("Loading…");
-  log("viewer loading", fileUrl);
-
   async function loadPdfBytes(bytes: Uint8Array): Promise<void> {
     const doc = await pdfjs
       .getDocument({ data: bytes, disableRange: true, disableStream: true })
@@ -305,37 +274,56 @@ async function main(): Promise<void> {
     });
   }
 
-  try {
-    if (fileUrl.startsWith("file://")) {
-      // Browsers sandbox extension pages from file:// URLs.
-      // Try the background script first (works in Chrome with "Allow access to file URLs").
-      // Fall back to the file picker on failure (works everywhere, no permissions needed).
-      let loaded = false;
-      try {
-        const resp = await chrome.runtime.sendMessage({ type: "fetchPdf", url: fileUrl });
-        if (resp?.ok) {
-          const binary = atob(resp.pdf.dataBase64 as string);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          await loadPdfBytes(bytes);
-          loaded = true;
-        }
-      } catch {
-        // Background fetch failed — fall through to file picker
-      }
-      if (!loaded) showFilePicker();
-    } else {
-      const doc = await pdfjs
-        .getDocument({ url: fileUrl, withCredentials: true, disableRange: true, disableStream: true })
-        .promise;
-      pdfViewer.setDocument(doc);
-      linkService.setDocument(doc, null);
-      setStatus(`${doc.numPages} page${doc.numPages === 1 ? "" : "s"}`);
-      startDetection("pdfjs", doc);
+  // ── Load PDF based on source ──
+  setStatus("Loading…");
+  log("viewer loading", localKey ? `localKey:${localKey}` : fileUrl);
+
+  if (localKey) {
+    try {
+      const entry = await idbPopPdf(localKey);
+      if (!entry) throw new Error("PDF not found — it may have expired, please try again");
+      if (titleEl) titleEl.textContent = entry.name;
+      document.title = `${entry.name} — Glimpse`;
+      await loadPdfBytes(entry.data);
+    } catch (err) {
+      errorLog("viewer failed to load local PDF", err);
+      setStatus(`Failed to load PDF: ${String((err as Error)?.message ?? err)}`);
     }
-  } catch (err) {
-    errorLog("viewer failed to load PDF", err);
-    setStatus(`Failed to load PDF: ${String((err as Error)?.message ?? err)}`);
+  } else if (fileUrl) {
+    if (titleEl) titleEl.textContent = decodeURIComponent(fileUrl.split("/").pop() || "PDF");
+    document.title = `${titleEl?.textContent ?? "PDF"} — Glimpse`;
+    try {
+      if (fileUrl.startsWith("file://")) {
+        // Browsers sandbox extension pages from file:// URLs.
+        // Try the background script first (works in Chrome with "Allow access to file URLs").
+        // Fall back to the file picker on failure (works everywhere, no permissions needed).
+        let loaded = false;
+        try {
+          const resp = await chrome.runtime.sendMessage({ type: "fetchPdf", url: fileUrl });
+          if (resp?.ok) {
+            const binary = atob(resp.pdf.dataBase64 as string);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            await loadPdfBytes(bytes);
+            loaded = true;
+          }
+        } catch {
+          // Background fetch failed — fall through to file picker
+        }
+        if (!loaded) showFilePicker();
+      } else {
+        const doc = await pdfjs
+          .getDocument({ url: fileUrl, withCredentials: true, disableRange: true, disableStream: true })
+          .promise;
+        pdfViewer.setDocument(doc);
+        linkService.setDocument(doc, null);
+        setStatus(`${doc.numPages} page${doc.numPages === 1 ? "" : "s"}`);
+        startDetection("pdfjs", doc);
+      }
+    } catch (err) {
+      errorLog("viewer failed to load PDF", err);
+      setStatus(`Failed to load PDF: ${String((err as Error)?.message ?? err)}`);
+    }
   }
 }
 
