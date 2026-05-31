@@ -7,37 +7,170 @@ body {
   font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+/* ── Toolbar ── */
 #toolbar {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 36px;
+  height: 44px;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 14px;
-  background: #323639;
-  color: #f1f1f1;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  background: #2b2e31;
+  color: #e8eaed;
   z-index: 10;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+.tb-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.tb-center {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.tb-right {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
 }
 
 #doc-title {
   font-weight: 600;
+  font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 60%;
+  color: #e8eaed;
 }
 
 #status {
-  color: #b9bcbf;
+  font-size: 12px;
+  color: #80868b;
+  white-space: nowrap;
 }
 
+/* Toolbar buttons */
+.tb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #bdc1c6;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+}
+
+.tb-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #e8eaed;
+}
+
+.tb-btn:active {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.tb-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Page info */
+.tb-page-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+#page-num {
+  width: 42px;
+  height: 26px;
+  padding: 0 4px;
+  background: #3c4043;
+  border: 1px solid #5f6368;
+  border-radius: 4px;
+  color: #e8eaed;
+  font-size: 12px;
+  text-align: center;
+  outline: none;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+#page-num::-webkit-outer-spin-button,
+#page-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+#page-num:focus {
+  border-color: #8ab4f8;
+  background: #2d3033;
+}
+
+.tb-sep,
+#page-count {
+  font-size: 12px;
+  color: #80868b;
+}
+
+/* Zoom select */
+#zoom-select {
+  height: 26px;
+  padding: 0 24px 0 8px;
+  background: #3c4043;
+  border: 1px solid #5f6368;
+  border-radius: 4px;
+  color: #e8eaed;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2380868b'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  min-width: 100px;
+}
+
+#zoom-select:focus {
+  border-color: #8ab4f8;
+}
+
+#zoom-select:hover {
+  background-color: #4a4e52;
+}
+
+/* Divider */
+.tb-divider {
+  width: 1px;
+  height: 20px;
+  background: #5f6368;
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+/* ── Viewer container ── */
 #viewerContainer {
   position: absolute;
-  top: 36px;
+  top: 44px;
   left: 0;
   right: 0;
   bottom: 0;
@@ -48,7 +181,7 @@ body {
   margin: 0 auto;
 }
 
-/* Panel/embedded mode: hide toolbar, let content fill the frame. */
+/* ── Panel/embedded mode ── */
 body.rp-panel-mode #toolbar {
   display: none;
 }
@@ -60,7 +193,7 @@ body.rp-panel-mode #viewerContainer {
 /* ── Local file picker overlay ── */
 #file-picker-overlay {
   position: fixed;
-  inset: 36px 0 0 0;
+  inset: 44px 0 0 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -128,4 +261,5 @@ body.rp-panel-mode #viewerContainer {
 #file-input {
   display: none;
 }
+
 
