@@ -548,7 +548,7 @@ export async function buildReferenceIndex(doc: PDFDocumentProxy): Promise<Refere
     if (!uniqueDests.has(l.destKey)) uniqueDests.set(l.destKey, l.dest);
   }
 
-  const resolvedDests = new Map<string, { pageIndex: number; top: number | null }>();
+  const resolvedDests = new Map<string, { pageIndex: number; top: number | null; left: number | null }>();
   const destEntries = [...uniqueDests.entries()];
   for (let base = 0; base < destEntries.length; base += CONCURRENCY) {
     const batch = destEntries.slice(base, base + CONCURRENCY);
