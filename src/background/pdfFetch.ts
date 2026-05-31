@@ -15,33 +15,34 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
 
 const MAX_BYTES = 50 * 1024 * 1024; // 50 MB safety cap
 
-/** Read a local file:// URL via XMLHttpRequest (fetch() doesn't work for file:// in extensions). */
-function fetchLocalPdf(url: string): Promise<FetchedPdf> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("GET", url, true);
-    xhr.responseType = "arraybuffer";
-    xhr.onload = () => {
-      // file:// requests return status 0 on success in most browsers/environments
-      if (xhr.status === 0 || xhr.status === 200) {
-        const buf = xhr.response as ArrayBuffer;
-        const magic = new Uint8Array(buf.slice(0, 5)).reduce((s, b) => s + String.fromCharCode(b), "");
-        if (magic !== "%PDF-") {
-          reject(new Error("Resource is not a PDF"));
-          return;
-        }
-        if (buf.byteLength > MAX_BYTES) {
-          reject(new Error("PDF too large to preview"));
-          return;
-        }
-        resolve({ dataBase64: arrayBufferToBase64(buf), contentType: "application/pdf", byteLength: buf.byteLength });
-      } else {
-        reject(new Error(`Failed to read local file (HTTP ${xhr.status})`));
-      }
-    };
-    xhr.onerror = () => reject(new Error("Could not read local file — ensure the extension has 'Allow access to file URLs' enabled in about:addons"));
-    xhr.send();
-  });
+/** Read a local file:// URL via fetch (requires the extension to have file:// host permission). */
+async function fetchLocalPdf(url: string): Promise<FetchedPdf> {
+  let buf: ArrayBuffer;
+  try {
+    // fetch() works for file:// URLs in extension background scripts when
+    // "file:///*" is listed in host_permissions and the user has enabled
+    // "Allow access to local files" in about:addons (Firefox) or
+    // "Allow access to file URLs" in chrome://extensions (Chrome).
+    const res = await fetch(url);
+    buf = await res.arrayBuffer();
+  } catch {
+    // Fall back to XHR — file:// responses have status 0 on success.
+    buf = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", url, true);
+      xhr.responseType = "arraybuffer";
+      xhr.onload = () => {
+        if (xhr.status === 0 || xhr.status === 200) resolve(xhr.response as ArrayBuffer);
+        else reject(new Error(`HTTP ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new Error("XHR failed"));
+      xhr.send();
+    });
+  }
+  const magic = new Uint8Array(buf.slice(0, 5)).reduce((s, b) => s + String.fromCharCode(b), "");
+  if (magic !== "%PDF-") throw new Error("Resource is not a PDF");
+  if (buf.byteLength > MAX_BYTES) throw new Error("PDF too large to preview");
+  return { dataBase64: arrayBufferToBase64(buf), contentType: "application/pdf", byteLength: buf.byteLength };
 }
 
 export async function fetchPdf(url: string): Promise<FetchedPdf> {

@@ -118,6 +118,9 @@ function buildManifest() {
 
   if (target === "firefox") {
     base.permissions.push("webRequest", "webRequestBlocking", "webRequestFilterResponse");
+    // Explicit file:// host permission — required for background fetch of local PDFs.
+    // This also makes the "Allow access to local files" toggle appear in about:addons.
+    base.host_permissions.push("file:///*");
     base.background = { scripts: ["background.js"] };
     base.browser_specific_settings = {
       gecko: {

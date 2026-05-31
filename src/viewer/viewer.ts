@@ -97,7 +97,12 @@ async function main(): Promise<void> {
       // the background script which runs with <all_urls> host permission and
       // can read local files via XMLHttpRequest.
       const resp = await chrome.runtime.sendMessage({ type: "fetchPdf", url: fileUrl });
-      if (!resp?.ok) throw new Error(resp?.error ?? "Background fetch failed");
+      if (!resp?.ok) {
+        throw new Error(
+          (resp?.error ?? "Background fetch failed") +
+            "\n\nFor local PDFs, enable 'Allow access to local files' for Glimpse in about:addons (Firefox) or 'Allow access to file URLs' in chrome://extensions (Chrome).",
+        );
+      }
       const binary = atob(resp.pdf.dataBase64 as string);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
