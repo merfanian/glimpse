@@ -89,13 +89,25 @@ async function main(): Promise<void> {
   log("viewer loading", fileUrl);
 
   try {
-    const loadingTask = pdfjs.getDocument({
-      url: fileUrl,
-      withCredentials: true,
-      disableRange: true,
-      disableStream: true,
-    });
-    const doc = await loadingTask.promise;
+    let doc: Awaited<ReturnType<typeof pdfjs.getDocument>["promise"]>;
+
+    if (fileUrl.startsWith("file://")) {
+      // Extension pages (moz-extension:// / chrome-extension://) cannot fetch
+      // file:// URLs directly due to cross-origin restrictions.  Route through
+      // the background script which runs with <all_urls> host permission and
+      // can read local files via XMLHttpRequest.
+      const resp = await chrome.runtime.sendMessage({ type: "fetchPdf", url: fileUrl });
+      if (!resp?.ok) throw new Error(resp?.error ?? "Background fetch failed");
+      const binary = atob(resp.pdf.dataBase64 as string);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      doc = await pdfjs.getDocument({ data: bytes, disableRange: true, disableStream: true }).promise;
+    } else {
+      doc = await pdfjs
+        .getDocument({ url: fileUrl, withCredentials: true, disableRange: true, disableStream: true })
+        .promise;
+    }
+
     pdfViewer.setDocument(doc);
     linkService.setDocument(doc, null);
     setStatus(`${doc.numPages} page(s)`);
