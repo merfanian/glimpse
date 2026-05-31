@@ -1,5 +1,5 @@
 // Background service worker: handles reference lookups across sources and PDF fetching.
-import type { Message, LookupRequest, FetchPdfRequest } from "@shared/messages";
+import type { Message, LookupRequest, FetchPdfRequest, StoreLocalPdfRequest, GetLocalPdfRequest } from "@shared/messages";
 import type { PaperCandidate, LookupResult } from "@shared/types";
 import { getSettings } from "@shared/settings";
 import { crossrefByDoi } from "./sources/crossref";
@@ -10,9 +10,17 @@ import { fetchPdf } from "./pdfFetch";
 import { getCapturedPdf, installPdfCapture } from "./pdfCapture";
 import { TtlCache } from "./cache";
 
-const PDF_URL_RE = /\.pdf($|[?#])/i;
-
 installPdfCapture();
+
+// In-memory store for PDFs loaded from the popup (file picker / drag-and-drop).
+// Keyed by a random UUID; entries expire after 2 minutes.
+const localPdfStore = new TtlCache<{ data: string; name: string }>(2 * 60 * 1000);
+
+function randomKey(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(12)))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 function viewerUrl(target: string): string {
   return chrome.runtime.getURL(`viewer.html?file=${encodeURIComponent(target)}`);
@@ -28,19 +36,8 @@ function openInViewer(target: string, tabId?: number): void {
   }
 }
 
-// Toolbar button: reopen the current tab's PDF in the bundled viewer.
-chrome.action?.onClicked.addListener((tab) => {
-  if (!tab.id) return;
-  const url = tab.url ?? "";
-  if (PDF_URL_RE.test(url) && !url.startsWith(chrome.runtime.getURL(""))) {
-    openInViewer(url, tab.id);
-  } else {
-    // Not obviously a PDF: open the viewer anyway so the user can paste/choose.
-    void chrome.tabs.create({ url: chrome.runtime.getURL("viewer.html") });
-  }
-});
-
 // Context menu: open a linked or current PDF in the bundled viewer.
+// (onClicked is NOT registered because we use a default_popup instead.)
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus?.create({
     id: "rp-open-link",
@@ -151,16 +148,29 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
     getCapturedPdf(url)
       .then((captured) => {
         if (captured) return captured;
-        // No cached capture: fall through to direct fetch.
-        // Both Chrome and Firefox background pages have <all_urls> host_permissions,
-        // so they can fetch Overleaf compile CDN URLs directly. filterResponseData
-        // capture is an optimisation (avoids re-downloading an already-loaded PDF);
-        // if it isn't ready yet, a direct fetch is the correct fallback.
         return fetchPdf(url);
       })
       .then((pdf) => sendResponse({ ok: true, pdf }))
       .catch((err) => sendResponse({ ok: false, error: String(err?.message ?? err) }));
     return true;
+  }
+  if (message.type === "storeLocalPdf") {
+    const { data, name } = message as StoreLocalPdfRequest;
+    const key = randomKey();
+    localPdfStore.set(key, { data, name });
+    sendResponse({ ok: true, key });
+    return false;
+  }
+  if (message.type === "getLocalPdf") {
+    const { key } = message as GetLocalPdfRequest;
+    const entry = localPdfStore.get(key);
+    if (entry) {
+      localPdfStore.delete(key);
+      sendResponse({ ok: true, pdf: entry });
+    } else {
+      sendResponse({ ok: false, error: "Local PDF not found or expired" });
+    }
+    return false;
   }
   return false;
 });

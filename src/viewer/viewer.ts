@@ -90,6 +90,33 @@ async function main(): Promise<void> {
   }
 
   // ── Full viewer mode ──
+
+  // Check if this was opened from the popup via a stored local PDF key
+  const localKey = new URLSearchParams(location.search).get("localKey");
+  if (localKey) {
+    const titleEl = document.getElementById("doc-title");
+    setStatus("Loading…");
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: "getLocalPdf", key: localKey });
+      if (!resp?.ok) throw new Error(resp?.error ?? "PDF not found");
+      const { data, name } = resp.pdf as { data: string; name: string };
+      if (titleEl) titleEl.textContent = name;
+      document.title = `${name} — Glimpse`;
+      const binary = atob(data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const doc = await pdfjs.getDocument({ data: bytes, disableRange: true, disableStream: true }).promise;
+      pdfViewer.setDocument(doc);
+      linkService.setDocument(doc, null);
+      setStatus(`${doc.numPages} page${doc.numPages === 1 ? "" : "s"}`);
+      startDetection("pdfjs", doc);
+    } catch (err) {
+      errorLog("viewer failed to load local PDF", err);
+      setStatus(`Failed to load PDF: ${String((err as Error)?.message ?? err)}`);
+    }
+    return;
+  }
+
   const fileUrl = getFileParam();
   const titleEl = document.getElementById("doc-title");
 

@@ -3,7 +3,9 @@ import type { LookupResult, ParsedReference, FetchedPdf } from "./types";
 
 export type Message =
   | LookupRequest
-  | FetchPdfRequest;
+  | FetchPdfRequest
+  | StoreLocalPdfRequest
+  | GetLocalPdfRequest;
 
 export interface LookupRequest {
   type: "lookup";
@@ -13,6 +15,27 @@ export interface LookupRequest {
 export interface FetchPdfRequest {
   type: "fetchPdf";
   url: string;
+}
+
+export interface StoreLocalPdfRequest {
+  type: "storeLocalPdf";
+  data: string; // base64
+  name: string;
+}
+
+export interface StoreLocalPdfResponse {
+  ok: true;
+  key: string;
+}
+
+export interface GetLocalPdfRequest {
+  type: "getLocalPdf";
+  key: string;
+}
+
+export interface GetLocalPdfResponse {
+  ok: true;
+  pdf: { data: string; name: string };
 }
 
 export interface LookupResponse {

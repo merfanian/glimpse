@@ -59,6 +59,11 @@ const entries = [
     entryPoints: { viewer: resolve(root, "src/viewer/viewer.ts") },
     format: "iife",
   },
+  // Toolbar popup.
+  {
+    entryPoints: { popup: resolve(root, "src/popup/popup.ts") },
+    format: "iife",
+  },
   // Page main-world fetch bridge (runs in the host page's JS context).
   {
     entryPoints: { pagefetch: resolve(root, "src/content/pageFetch.ts") },
@@ -79,7 +84,8 @@ function buildManifest() {
     permissions: ["storage", "contextMenus", "tabs"],
     host_permissions: ["<all_urls>"],
     action: {
-      default_title: "Open PDF in Glimpse viewer",
+      default_title: "Glimpse — PDF Preview",
+      default_popup: "popup.html",
       default_icon: {
         48: "icons/icon-48.png",
         128: "icons/icon-128.png",
@@ -170,6 +176,10 @@ function copyStatic() {
   // Panel CSS (web-accessible so the content script can inject it into the page/shadow root)
   const panelCss = resolve(root, "src/content/panel/panel.css");
   if (existsSync(panelCss)) copyFileSync(panelCss, resolve(outdir, "panel.css"));
+
+  // Popup HTML + CSS
+  copyFileSync(resolve(root, "src/popup/popup.html"), resolve(outdir, "popup.html"));
+  copyFileSync(resolve(root, "src/popup/popup.css"), resolve(outdir, "popup.css"));
 
   // Icons (optional placeholders)
   const iconsDir = resolve(root, "assets/icons");

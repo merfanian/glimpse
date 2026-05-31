@@ -1,0 +1,258 @@
+/* Glimpse popup styles */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 300px;
+  background: #202124;
+  color: #e8eaed;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  user-select: none;
+}
+
+/* ── Header ── */
+#header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid #3c4043;
+}
+
+#logo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #8ab4f8;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #80868b;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8eaed;
+}
+
+/* ── Current-tab PDF section ── */
+#section-current {
+  padding: 10px 12px 4px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, transform 0.1s;
+}
+
+.action-btn:active {
+  transform: scale(0.98);
+}
+
+.action-btn.primary {
+  background: #1a73e8;
+  color: #fff;
+}
+
+.action-btn.primary:hover {
+  background: #1967d2;
+}
+
+.action-btn svg:first-child {
+  flex-shrink: 0;
+}
+
+.btn-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.btn-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btn-sub {
+  font-size: 11px;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.chevron {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* ── Divider ── */
+#section-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: #3c4043;
+}
+
+.divider-label {
+  font-size: 11px;
+  color: #80868b;
+  white-space: nowrap;
+}
+
+/* ── Local file section ── */
+#section-local {
+  padding: 8px 12px 10px;
+}
+
+#drop-zone {
+  border: 1.5px dashed #5f6368;
+  border-radius: 10px;
+  padding: 18px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  outline: none;
+}
+
+#drop-zone:hover,
+#drop-zone:focus {
+  border-color: #8ab4f8;
+  background: rgba(138, 180, 248, 0.05);
+}
+
+#drop-zone.dragover {
+  border-color: #8ab4f8;
+  background: rgba(138, 180, 248, 0.12);
+}
+
+#drop-zone svg {
+  color: #5f6368;
+  margin-bottom: 8px;
+  transition: color 0.15s;
+}
+
+#drop-zone:hover svg,
+#drop-zone:focus svg,
+#drop-zone.dragover svg {
+  color: #8ab4f8;
+}
+
+.drop-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #bdc1c6;
+}
+
+.drop-sub {
+  margin: 3px 0 8px;
+  font-size: 11px;
+  color: #5f6368;
+}
+
+#choose-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  background: #3c4043;
+  color: #e8eaed;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+#choose-label:hover {
+  background: #4a4e52;
+}
+
+#drop-zone-over {
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+#drop-zone-over svg {
+  color: #8ab4f8;
+  margin-bottom: 0;
+}
+
+#drop-zone-over .drop-title {
+  color: #8ab4f8;
+}
+
+#file-input {
+  display: none;
+}
+
+/* ── Status bar ── */
+#status-bar {
+  padding: 4px 14px 8px;
+  font-size: 12px;
+  color: #f28b82;
+}
+
+#status-bar.info {
+  color: #80868b;
+}
+
+/* ── Footer ── */
+#footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 14px 10px;
+  border-top: 1px solid #3c4043;
+}
+
+#version-label {
+  font-size: 11px;
+  color: #5f6368;
+}
+
+/* ── Utility ── */
+.hidden {
+  display: none !important;
+}
