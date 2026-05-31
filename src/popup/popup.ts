@@ -72,25 +72,25 @@ async function main(): Promise<void> {
     });
   }
 
-  // File input
-  const fileInput = el<HTMLInputElement>("file-input");
-  fileInput.addEventListener("change", () => {
-    const file = fileInput.files?.[0];
-    if (file) void openFileInViewer(file);
+  // File input — in popup context, clicking the choose label (for="file-input")
+  // will open a native file dialog which closes the popup, killing the JS context.
+  // Instead, intercept the label click and open the viewer as a full tab (which has
+  // its own working file picker). Drag-and-drop still works in the popup directly.
+  const chooseLabelEl = el("choose-label");
+  chooseLabelEl.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const viewerUrl = chrome.runtime.getURL("viewer.html");
+    void chrome.tabs.create({ url: viewerUrl });
+    window.close();
   });
 
-  // Drop zone click → trigger file input
+  // Drop zone click → open viewer tab (file picker lives there, not in the popup)
   const dropZone = el("drop-zone");
-  dropZone.addEventListener("click", (e) => {
-    // Only if not clicking the choose-label itself (it already triggers input)
-    if ((e.target as HTMLElement).closest("#choose-label")) return;
-    fileInput.click();
-  });
-  dropZone.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      fileInput.click();
-    }
+  dropZone.addEventListener("click", () => {
+    const viewerUrl = chrome.runtime.getURL("viewer.html");
+    void chrome.tabs.create({ url: viewerUrl });
+    window.close();
   });
 
   const idle = el("drop-zone-idle");
@@ -120,7 +120,11 @@ async function main(): Promise<void> {
     over.classList.add("hidden");
     clearStatus();
     const file = e.dataTransfer?.files[0];
-    if (file) void openFileInViewer(file);
+    if (file) {
+      openFileInViewer(file).catch((err: unknown) => {
+        setStatus(`Failed to open: ${String((err as Error)?.message ?? err)}`);
+      });
+    }
   });
 }
 

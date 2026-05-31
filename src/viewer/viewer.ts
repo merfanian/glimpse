@@ -276,7 +276,42 @@ async function main(): Promise<void> {
 
   // ── Load PDF based on source ──
   setStatus("Loading…");
-  log("viewer loading", localKey ? `localKey:${localKey}` : fileUrl);
+  log("viewer loading", localKey ? `localKey:${localKey}` : (fileUrl ?? "landing"));
+
+  if (!localKey && !fileUrl) {
+    // Landing page: no PDF specified — show the file picker overlay with drag-and-drop.
+    const overlay = document.getElementById("file-picker-overlay")!;
+    const hint = document.getElementById("file-picker-hint")!;
+    const input = document.getElementById("file-input") as HTMLInputElement;
+    hint.textContent = "Choose a PDF from your computer, or drag and drop it here.";
+    overlay.classList.remove("hidden");
+    setStatus("Open a PDF");
+    document.title = "Glimpse";
+    if (titleEl) titleEl.textContent = "Glimpse";
+
+    const loadFromFile = (file: File) => {
+      overlay.classList.add("hidden");
+      setStatus("Loading…");
+      document.title = `${file.name} — Glimpse`;
+      if (titleEl) titleEl.textContent = file.name;
+      const reader = new FileReader();
+      reader.onload = () => loadPdfBytes(new Uint8Array(reader.result as ArrayBuffer))
+        .catch((err: unknown) => setStatus(`Failed to load: ${String((err as Error)?.message ?? err)}`));
+      reader.onerror = () => setStatus("Failed to read file");
+      reader.readAsArrayBuffer(file);
+    };
+
+    input.addEventListener("change", () => { if (input.files?.[0]) loadFromFile(input.files[0]); });
+
+    // Full page drag-and-drop on landing
+    document.addEventListener("dragover", (e) => e.preventDefault());
+    document.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer?.files[0];
+      if (file) loadFromFile(file);
+    });
+    return;
+  }
 
   if (localKey) {
     try {
