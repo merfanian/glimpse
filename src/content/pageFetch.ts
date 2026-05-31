@@ -151,16 +151,69 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
     return typeof value === "number" ? value : null;
   }
 
+  // Extract left (X) from XYZ and FitR destinations.
+  function destLeft(explicit: unknown[]): number | null {
+    const fit = explicit[1] as { name?: string } | string | undefined;
+    const name = typeof fit === "object" && fit ? fit.name : fit;
+    if (name !== "XYZ" && name !== "FitR") return null;
+    const value = explicit[2];
+    return typeof value === "number" ? value : null;
+  }
+
+  // Sort text items into visual reading order (top-to-bottom, left-to-right within
+  // each line band). Groups items within 3 pts of Y into the same band and sorts by
+  // X ascending within the band, ensuring [N] markers (x=57) precede entry text (x=70)
+  // even when their Y values differ by a tiny floating-point amount.
+  function sortItemsIntoLines(
+    items: Array<{ x: number; y: number; str: string }>,
+  ): Array<{ x: number; y: number; str: string }> {
+    const byY = [...items].sort((a, b) => b.y - a.y);
+    const bands: (typeof items)[] = [];
+    for (const it of byY) {
+      const last = bands[bands.length - 1];
+      if (last && Math.abs(last[0].y - it.y) <= 3) last.push(it);
+      else bands.push([it]);
+    }
+    return bands.flatMap((b) => b.sort((a, c) => a.x - c.x));
+  }
+
+  // Detect a column separator X by finding the largest gap in line-start X positions.
+  // Returns null if no clear two-column structure is found (gap < 40 pts).
+  function detectColumnSeparator(items: Array<{ x: number; y: number; str: string }>): number | null {
+    const lineMinX: number[] = [];
+    let lineY: number | null = null;
+    let minX = Infinity;
+    for (const it of items) {
+      if (lineY === null || Math.abs(it.y - lineY) > 3) {
+        if (minX !== Infinity) lineMinX.push(minX);
+        lineY = it.y;
+        minX = it.x;
+      } else {
+        minX = Math.min(minX, it.x);
+      }
+    }
+    if (minX !== Infinity) lineMinX.push(minX);
+    if (lineMinX.length < 4) return null;
+    const sorted = [...lineMinX].sort((a, b) => a - b);
+    let maxGap = 0;
+    let sep = -1;
+    for (let i = 1; i < sorted.length; i++) {
+      const gap = sorted[i] - sorted[i - 1];
+      if (gap > maxGap) { maxGap = gap; sep = (sorted[i - 1] + sorted[i]) / 2; }
+    }
+    return maxGap >= 40 ? sep : null;
+  }
+
   async function resolveDest(
     doc: PdfDocumentLike,
     dest: unknown,
-  ): Promise<{ pageIndex: number; top: number | null } | null> {
+  ): Promise<{ pageIndex: number; top: number | null; left: number | null } | null> {
     const explicit = typeof dest === "string" ? await doc.getDestination(dest) : Array.isArray(dest) ? dest : null;
     if (!explicit || explicit.length === 0) return null;
 
     try {
       const pageIndex = await doc.getPageIndex(explicit[0]);
-      return { pageIndex, top: destTop(explicit) };
+      return { pageIndex, top: destTop(explicit), left: destLeft(explicit) };
     } catch {
       return null;
     }
@@ -170,6 +223,7 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
     doc: PdfDocumentLike,
     pageIndex: number,
     top: number | null,
+    left: number | null,
   ): Promise<string> {
     const page = await doc.getPage(pageIndex + 1);
     const viewport = page.getViewport({ scale: 1 });
@@ -180,11 +234,27 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
       if (typeof it.str !== "string" || it.str.length === 0 || !Array.isArray(it.transform)) continue;
       items.push({ x: it.transform[4], y: it.transform[5], str: it.str });
     }
-    items.sort((a, b) => b.y - a.y || a.x - b.x);
 
     const startY = top == null ? viewport.height : top;
+
+    // Detect column separator from ALL page items for reliable gap detection.
+    const sep = left !== null ? detectColumnSeparator(items) : null;
+
+    // Apply column filter BEFORE band-sort.
+    // Left col (left < sep): keep items left of separator.
+    // Right col (left >= sep): keep items within 40 pts of the destination's X to
+    // exclude "gap" items that fall between columns due to floating-point Y grouping.
+    const COL_MARGIN = 20;
+    const colItems =
+      sep !== null && left !== null
+        ? items.filter((i) => (left < sep ? i.x < sep : i.x >= left - COL_MARGIN))
+        : items;
+
+    // Band-sort only within the target column, then Y-filter.
+    const below = sortItemsIntoLines(colItems).filter((i) => i.y <= startY + 2);
+
     const lines: Array<{ y: number; x: number; str: string }> = [];
-    for (const it of items.filter((i) => i.y <= startY + 2)) {
+    for (const it of below) {
       const last = lines[lines.length - 1];
       if (last && Math.abs(last.y - it.y) <= 3) {
         last.str += (last.str.endsWith(" ") ? "" : " ") + it.str;
@@ -195,9 +265,24 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
 
     const collected: string[] = [];
     let prevY: number | null = null;
+    // For [N]-style numbered references, the XYZ destination lands ~8 pts above the
+    // actual [N] marker, so the last line(s) of the previous entry may appear first.
+    // Edge case: when line spacing equals the 8pt hyperref margin, the destination top
+    // lands exactly on the previous entry's [N] marker. Skip any [N] within 1 pt of
+    // startY — it belongs to the previous entry, not the target.
+    const hasNumberMarker = lines.some((l) => /^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(l.str.trim()));
+    let pastFirstMarker = !hasNumberMarker; // author-year style: start immediately
     for (const line of lines) {
       const text = line.str.trim();
       if (!text) continue;
+      if (!pastFirstMarker) {
+        if (/^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(text)) {
+          if (startY - line.y <= 1) continue; // [N] at the very top of range → previous entry, skip
+          pastFirstMarker = true;
+        } else {
+          continue; // skip pre-marker tail from previous entry
+        }
+      }
       if (collected.length > 0 && /^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(text)) break;
       if (prevY != null && prevY - line.y > 28 && collected.length > 0) break;
       collected.push(text);
@@ -243,7 +328,7 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
         if (!reference) {
           const resolved = await resolveDest(doc, a.dest);
           if (!resolved) continue;
-          const raw = await extractEntryText(doc, resolved.pageIndex, resolved.top);
+          const raw = await extractEntryText(doc, resolved.pageIndex, resolved.top, resolved.left);
           if (!raw || raw.length < 8) continue;
           reference = parseReference(raw);
           // Cache even rejected entries to avoid re-extracting text for subsequent

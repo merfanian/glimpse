@@ -319,11 +319,23 @@ export function destTop(explicit: unknown[]): number | null {
   return typeof value === "number" ? value : null;
 }
 
-/** Resolve a pdf.js destination array/name to a concrete page index + top coordinate. */
+/**
+ * Extract the `left` (PDF user-space X) from an explicit destination, if available.
+ * Only XYZ [ref, /XYZ, left, top, zoom] and FitR [ref, /FitR, left, ...] carry a left.
+ */
+function destLeft(explicit: unknown[]): number | null {
+  const fit = explicit[1] as { name?: string } | string | undefined;
+  const name = typeof fit === "object" && fit ? fit.name : fit;
+  if (name !== "XYZ" && name !== "FitR") return null;
+  const value = explicit[2]; // left is always at index 2 for both types
+  return typeof value === "number" ? value : null;
+}
+
+/** Resolve a pdf.js destination array/name to a concrete page index + top + left coordinates. */
 async function resolveDest(
   doc: PDFDocumentProxy,
   dest: unknown,
-): Promise<{ pageIndex: number; top: number | null } | null> {
+): Promise<{ pageIndex: number; top: number | null; left: number | null } | null> {
   let explicit: unknown[] | null = null;
   if (typeof dest === "string") {
     explicit = await doc.getDestination(dest);
@@ -339,7 +351,7 @@ async function resolveDest(
   } catch {
     return null;
   }
-  return { pageIndex, top: destTop(explicit) };
+  return { pageIndex, top: destTop(explicit), left: destLeft(explicit) };
 }
 
 interface TextItem {
@@ -349,14 +361,102 @@ interface TextItem {
 }
 
 /**
+ * Sort text items into visual reading order (top-to-bottom, left-to-right).
+ * Groups items within 3 pts of Y into the same "line band" and sorts by X ascending
+ * within each band. This ensures reference markers like "[2]" (which may have a
+ * slightly lower Y than the adjacent text due to PDF floating-point arithmetic)
+ * still appear before the entry text in the output.
+ */
+function sortItemsIntoLines(items: TextItem[]): TextItem[] {
+  const byY = [...items].sort((a, b) => b.y - a.y);
+  const bands: TextItem[][] = [];
+  for (const it of byY) {
+    const last = bands[bands.length - 1];
+    if (last && Math.abs(last[0].y - it.y) <= 3) last.push(it);
+    else bands.push([it]);
+  }
+  return bands.flatMap((b) => b.sort((a, c) => a.x - c.x));
+}
+
+/**
+ * Detect a column separator X on a page by finding the largest horizontal gap
+ * among the leftmost-X positions of each visual line.
+ *
+ * Returns the X separator if a gap > 40 pts is found (indicating two columns),
+ * otherwise returns null (single-column layout).
+ */
+function detectColumnSeparator(items: TextItem[]): number | null {
+  // Build visual lines (items already sorted y-desc, x-asc by callers)
+  const lineMinX: number[] = [];
+  let lineY: number | null = null;
+  let minX = Infinity;
+  for (const it of items) {
+    if (lineY === null || Math.abs(it.y - lineY) > 3) {
+      if (minX !== Infinity) lineMinX.push(minX);
+      lineY = it.y;
+      minX = it.x;
+    } else {
+      minX = Math.min(minX, it.x);
+    }
+  }
+  if (minX !== Infinity) lineMinX.push(minX);
+  if (lineMinX.length < 4) return null;
+
+  const sorted = [...lineMinX].sort((a, b) => a - b);
+  let maxGap = 0;
+  let separatorX = -1;
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i] - sorted[i - 1];
+    if (gap > maxGap) {
+      maxGap = gap;
+      separatorX = (sorted[i - 1] + sorted[i]) / 2;
+    }
+  }
+  return maxGap >= 40 ? separatorX : null;
+}
+
+/**
  * Extract the bibliography entry text starting at the destination position.
- * Items must be pre-sorted top-to-bottom, left-to-right.
  * Collects lines starting at `top` (or page top when null), stopping at the next
  * reference marker or a large vertical gap.
+ *
+ * `left`: the X position from the destination (XYZ/FitR); used for column-aware
+ * filtering on multi-column pages so items from an adjacent column are excluded.
+ * Column filtering is applied BEFORE band-sorting so cross-column items at similar
+ * Y values are never mixed into the same line band.
  */
-function extractTextFromItems(items: TextItem[], top: number | null, pageHeight: number): string {
+function extractTextFromItems(
+  items: TextItem[],
+  top: number | null,
+  pageHeight: number,
+  left: number | null,
+): string {
   const startY = top ?? pageHeight;
-  const below = items.filter((i) => i.y <= startY + 2);
+
+  // Detect column separator from ALL page items for reliable gap detection.
+  const sep = left !== null ? detectColumnSeparator(items) : null;
+
+  // Apply column filter BEFORE band-sort so cross-column items at similar Y values
+  // (e.g. a left-col journal name and a right-col [N] marker within 3 pts of Y) are
+  // never grouped into the same line band.
+  //
+  // For the LEFT column (left < sep): keep items to the left of the separator.
+  // For the RIGHT column (left >= sep): keep items within 40 pts of the destination's
+  // own X (`left`). Using `left - 40` instead of `sep` avoids misclassifying "gap"
+  // items (x=57..sep) that sit between the columns due to floating-point Y grouping.
+  const COL_MARGIN = 20;
+  const colItems =
+    sep !== null && left !== null
+      ? items.filter((i) => (left < sep ? i.x < sep : i.x >= left - COL_MARGIN))
+      : items;
+
+  // Band-sort: group items within 3 pts of Y into the same line, sorted by X within
+  // each band. This ensures [N] markers (x=57) precede entry text (x=70) even when
+  // their Y values differ by tiny floating-point amounts.
+  const sorted = sortItemsIntoLines(colItems);
+
+  // Y filter: keep only items at or below the destination top.
+  const below = sorted.filter((i) => i.y <= startY + 2);
 
   // Group into lines by y proximity.
   const lines: TextItem[] = [];
@@ -371,9 +471,24 @@ function extractTextFromItems(items: TextItem[], top: number | null, pageHeight:
 
   const collected: string[] = [];
   let prevY: number | null = null;
+  // For [N]-style numbered references, the XYZ destination lands ~8 pts above the
+  // actual [N] marker, so the last line(s) of the previous entry may appear first.
+  // Edge case: when line spacing equals the 8pt hyperref margin, the destination top
+  // lands exactly on the previous entry's [N] marker. Skip any [N] within 1 pt of
+  // startY — it belongs to the previous entry, not the target.
+  const hasNumberMarker = lines.some((l) => /^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(l.str.trim()));
+  let pastFirstMarker = !hasNumberMarker; // author-year style: start immediately
   for (const line of lines) {
     const text = line.str.trim();
     if (!text) continue;
+    if (!pastFirstMarker) {
+      if (/^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(text)) {
+        if (startY - line.y <= 1) continue; // [N] at the very top of range → previous entry, skip
+        pastFirstMarker = true;
+      } else {
+        continue; // skip pre-marker tail from previous entry
+      }
+    }
     // Stop at the start of the next reference entry (e.g. "[12]", "(12)", "12.").
     if (collected.length > 0 && /^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(text)) break;
     // Stop on an unusually large vertical gap (new block/section).
@@ -469,7 +584,8 @@ export async function buildReferenceIndex(doc: PDFDocumentProxy): Promise<Refere
             y: (it["transform"] as number[])[5],
             str: it["str"] as string,
           }));
-        // Sort top-to-bottom (PDF y grows upward), then left-to-right.
+        // Sort top-to-bottom (PDF y grows upward); within-line X ordering is handled
+        // inside extractTextFromItems after column filtering.
         items.sort((a, b) => b.y - a.y || a.x - b.x);
         return { pageIndex, items };
       }),
@@ -485,7 +601,7 @@ export async function buildReferenceIndex(doc: PDFDocumentProxy): Promise<Refere
     const items = textContent.get(r.pageIndex);
     if (!items) continue;
     const pageH = pageSizes.get(r.pageIndex + 1)?.height ?? 0;
-    const raw = extractTextFromItems(items, r.top, pageH);
+    const raw = extractTextFromItems(items, r.top, pageH, r.left);
     if (!raw || raw.length < 8) continue;
     const ref = parseReference(raw);
     if (!isBibliographyEntry(destKey, ref)) continue;
