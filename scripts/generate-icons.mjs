@@ -32,9 +32,10 @@ for (const size of sizes) {
   if (cmd && existsSync(src)) {
     execFileSync(cmd, [
       src,
-      "-fuzz", "6%", "-trim", "+repage",
+      "-fuzz", "12%", "-transparent", "white",
+      "-trim", "+repage",
       "-resize", `${size}x${size}`,
-      "-background", "white", "-gravity", "center", "-extent", `${size}x${size}`,
+      "-background", "none", "-gravity", "center", "-extent", `${size}x${size}`,
       "-strip", out,
     ]);
     rendered++;
