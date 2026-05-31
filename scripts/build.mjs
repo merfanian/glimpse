@@ -137,6 +137,10 @@ function buildManifest() {
       gecko: {
         id: "glimpse@merfanian.github.io",
         strict_min_version: "115.0",
+        data_collection_permissions: {
+          required: [],
+          optional: [],
+        },
       },
     };
   } else {
