@@ -392,9 +392,9 @@ export class CitationDetector {
   private handlePointerOut = (e: Event): void => {
     const target = e.target as Element | null;
     if (target && this.citationAnchor(target) === this.currentAnchor) {
-      // Only schedule hide (and reset tracking) when leaving the anchor that owns
-      // the current tooltip, not every anchor in the document.
-      this.currentAnchor = null;
+      // Schedule hide — the tooltip's own pointerenter will cancel it if the user
+      // moves onto the tooltip chip. Do NOT clear currentAnchor here: the user may
+      // be moving toward the tooltip to click it, and previewCurrent() needs the ref.
       this.cb.hideTooltip();
     }
   };
