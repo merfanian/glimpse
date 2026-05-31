@@ -1,10 +1,20 @@
-# ReferencePreviewer
+# Glimpse
 
 Hover a citation in a paper, click **Show preview**, and instantly see the cited paper's
 PDF (or abstract) in a draggable, resizable floating panel — without leaving the page.
 
 Works in **Overleaf** and **pdf.js-based PDF viewers**. Fully client-side: no backend, no
 account, no tracking. Looks papers up via **Crossref**, **arXiv**, and **Semantic Scholar**.
+
+## Install
+
+**From the extension stores** (recommended) — coming soon to the Chrome Web Store,
+Microsoft Edge Add-ons, and Firefox Add-ons (AMO).
+
+**From a GitHub Release** — every tagged release attaches ready-to-install packages:
+download `glimpse-chrome.zip`, `glimpse-edge.zip`, or `glimpse-firefox.zip` from the
+[Releases page](https://github.com/merfanian/glimpse/releases), then follow
+[Load unpacked](#load-unpacked) below (unzip first for Chrome/Edge).
 
 ## How it works
 
@@ -33,12 +43,12 @@ scripts/         esbuild build, icon generator, packaging
 
 Browsers render local (`file://`) and many remote PDFs in their **native PDF viewer**
 (PDFium), which extensions cannot script — so hover previews can't work there directly.
-ReferencePreviewer ships its own **bundled pdf.js viewer** to cover those cases:
+Glimpse ships its own **bundled pdf.js viewer** to cover those cases:
 
-- Click the **ReferencePreviewer toolbar button** while a `.pdf` tab is open to reopen it in
+- Click the **Glimpse toolbar button** while a `.pdf` tab is open to reopen it in
   the bundled viewer (where hover previews work).
-- Right-click a **link to a PDF** → **Open PDF in ReferencePreviewer**, or right-click a PDF
-  page → **Open this PDF in ReferencePreviewer**.
+- Right-click a **link to a PDF** → **Open PDF in Glimpse**, or right-click a PDF
+  page → **Open this PDF in Glimpse**.
 - The bundled viewer renders the text + link layers, so the same citation detection applies.
 
 To open local `file://` PDFs this way in Chrome/Edge, enable **Allow access to file URLs**
@@ -50,7 +60,7 @@ on the extension's details page.
 
 ## Troubleshooting
 
-The extension logs to the page's DevTools console, prefixed with `[ReferencePreviewer]`.
+The extension logs to the page's DevTools console, prefixed with `[Glimpse]`.
 Open DevTools (F12) → Console and look for lines such as:
 
 - `bootstrap on … -> environment: overleaf | pdfjs | null` — whether the page was recognized.
@@ -59,7 +69,7 @@ Open DevTools (F12) → Console and look for lines such as:
 
 Common cases:
 - **`environment: null`** on a PDF tab → you're in the browser's **built-in PDF viewer**,
-  which extensions cannot access. Click the **ReferencePreviewer toolbar button** to reopen
+  which extensions cannot access. Click the **Glimpse toolbar button** to reopen
   the PDF in the bundled viewer, or use a pdf.js-based viewer or Overleaf instead.
 - **No tooltip on hover in Overleaf** → the PDF's link/annotation layer wasn't found; please
   report the console output.
@@ -84,6 +94,32 @@ npm run watch            # rebuild Chrome target on change
 The same Manifest V3 source builds for Chrome, Edge, and Firefox. The only per-browser
 difference is the background declaration (`service_worker` for Chrome/Edge, `scripts` plus a
 `browser_specific_settings.gecko` id for Firefox), handled automatically by the build script.
+
+## Releases & store publishing
+
+CI (`.github/workflows/ci.yml`) type-checks, tests, and builds on every push/PR.
+
+Releases are automated by `.github/workflows/release.yml`. Push a version tag to cut one:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The workflow takes the version from the tag, builds all three targets, attaches
+`glimpse-chrome.zip`, `glimpse-edge.zip`, and `glimpse-firefox.zip` to a GitHub Release,
+and — when the matching repository secrets are configured — uploads the new version to each
+extension store. Each store is independent: if its secrets are absent, that publish step is
+skipped (the GitHub Release still happens).
+
+| Store | Secrets |
+| --- | --- |
+| Chrome Web Store | `CHROME_EXTENSION_ID`, `CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`, `CHROME_REFRESH_TOKEN` |
+| Microsoft Edge Add-ons | `EDGE_PRODUCT_ID`, `EDGE_CLIENT_ID`, `EDGE_API_KEY` |
+| Firefox AMO | `FIREFOX_JWT_ISSUER`, `FIREFOX_JWT_SECRET` |
+
+Add these under **Settings → Secrets and variables → Actions**. A first manual submission per
+store (to create the listing / obtain the IDs) is required before automated updates work.
 
 ## Load unpacked
 

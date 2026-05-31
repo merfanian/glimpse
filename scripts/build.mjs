@@ -1,4 +1,4 @@
-// Build script for the ReferencePreviewer extension.
+// Build script for the Glimpse extension.
 // Bundles content script, background service worker, and options page with esbuild,
 // copies the pdf.js worker and static assets, and writes a per-browser manifest.
 import { build, context } from "esbuild";
@@ -69,7 +69,7 @@ const entries = [
 function buildManifest() {
   const base = {
     manifest_version: 3,
-    name: "ReferencePreviewer",
+    name: "Glimpse",
     version: pkg.version,
     description: pkg.description,
     icons: {
@@ -79,7 +79,7 @@ function buildManifest() {
     permissions: ["storage", "contextMenus", "tabs"],
     host_permissions: ["<all_urls>"],
     action: {
-      default_title: "Open PDF in ReferencePreviewer viewer",
+      default_title: "Open PDF in Glimpse viewer",
       default_icon: {
         48: "icons/icon-48.png",
         128: "icons/icon-128.png",
@@ -121,7 +121,7 @@ function buildManifest() {
     base.background = { scripts: ["background.js"] };
     base.browser_specific_settings = {
       gecko: {
-        id: "reference-previewer@local",
+        id: "glimpse@merfanian.github.io",
         strict_min_version: "115.0",
       },
     };

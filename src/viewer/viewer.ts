@@ -79,11 +79,11 @@ async function main(): Promise<void> {
   const titleEl = document.getElementById("doc-title");
 
   if (!fileUrl) {
-    setStatus("No PDF specified. Open a PDF via the ReferencePreviewer toolbar button.");
+    setStatus("No PDF specified. Open a PDF via the Glimpse toolbar button.");
     return;
   }
   if (titleEl) titleEl.textContent = fileUrl.split("/").pop() || "PDF";
-  document.title = `${titleEl?.textContent ?? "PDF"} — ReferencePreviewer`;
+  document.title = `${titleEl?.textContent ?? "PDF"} — Glimpse`;
 
   setStatus("Loading…");
   log("viewer loading", fileUrl);

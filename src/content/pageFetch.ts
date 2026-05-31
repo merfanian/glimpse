@@ -217,7 +217,7 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
       // path can start quickly when the iframe PDF isn't accessible.
       for (let i = 0; i < 5 && !doc; i++) {
         if (i > 0) await new Promise<void>((r) => setTimeout(r, 200));
-        doc = currentPdfDocument();
+        doc = currentPdfDocument() ?? undefined;
       }
       if (!doc) throw new Error("No loaded pdf.js document found in page context");
     }

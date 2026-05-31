@@ -4,7 +4,7 @@ import { Panel } from "./Panel";
 import { ErrorPanel } from "./ErrorPanel";
 import type { ParsedReference } from "@shared/types";
 
-const HOST_ID = "reference-previewer-root";
+const HOST_ID = "glimpse-root";
 
 export interface PanelController {
   open(reference: ParsedReference): void;

@@ -1,5 +1,5 @@
 {
-  "name": "reference-previewer",
+  "name": "glimpse",
   "version": "0.1.0",
   "description": "Hover a citation in a PDF and preview the cited paper (PDF or abstract) in a floating in-tab panel.",
   "type": "module",

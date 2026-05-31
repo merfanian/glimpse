@@ -1,7 +1,7 @@
 // Lightweight, prefixed logger. Silenced in production builds via esbuild dead-code elimination.
 export const DEBUG = process.env.NODE_ENV !== "production";
 
-const PREFIX = "[ReferencePreviewer]";
+const PREFIX = "[Glimpse]";
 
 export const log = (...args: unknown[]): void => {
   if (DEBUG) console.log(PREFIX, ...args);

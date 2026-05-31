@@ -13,7 +13,7 @@ async function bootstrap(): Promise<void> {
     if (/\.pdf($|[?#])/i.test(location.href) || document.contentType === "application/pdf") {
       warn(
         "This looks like the browser's built-in PDF viewer, which extensions cannot access. " +
-          "Use the ReferencePreviewer toolbar button to reopen this PDF in the bundled viewer.",
+          "Use the Glimpse toolbar button to reopen this PDF in the bundled viewer.",
       );
     }
     return;

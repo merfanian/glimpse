@@ -28,7 +28,7 @@ function OptionsApp() {
 
   return (
     <div class="wrap">
-      <h1>ReferencePreviewer</h1>
+      <h1>Glimpse</h1>
       <p class="sub">Preview cited papers by hovering citations in Overleaf and PDF viewers.</p>
 
       <section>

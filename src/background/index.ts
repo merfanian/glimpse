@@ -7,7 +7,7 @@ import { arxivById } from "./sources/arxiv";
 import { s2Match, s2ByDoi, s2ByArxiv, s2Search } from "./sources/semanticScholar";
 import { withArxivPdf } from "./matching";
 import { fetchPdf } from "./pdfFetch";
-import { getCapturedPdf, installPdfCapture, isOverleafCompilePdf } from "./pdfCapture";
+import { getCapturedPdf, installPdfCapture } from "./pdfCapture";
 import { TtlCache } from "./cache";
 
 const PDF_URL_RE = /\.pdf($|[?#])/i;
@@ -44,13 +44,13 @@ chrome.action?.onClicked.addListener((tab) => {
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus?.create({
     id: "rp-open-link",
-    title: "Open PDF in ReferencePreviewer",
+    title: "Open PDF in Glimpse",
     contexts: ["link"],
     targetUrlPatterns: ["*://*/*.pdf", "*://*/*.pdf?*", "file:///*.pdf"],
   });
   chrome.contextMenus?.create({
     id: "rp-open-page",
-    title: "Open this PDF in ReferencePreviewer",
+    title: "Open this PDF in Glimpse",
     contexts: ["page"],
     documentUrlPatterns: ["*://*/*.pdf", "*://*/*.pdf?*", "file:///*.pdf"],
   });
@@ -75,7 +75,7 @@ async function settled<T>(p: Promise<T>): Promise<T | null> {
   try {
     return await p;
   } catch (err) {
-    console.warn("[ReferencePreviewer] source error:", err);
+    console.warn("[Glimpse] source error:", err);
     return null;
   }
 }

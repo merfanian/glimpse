@@ -136,7 +136,7 @@ export function installPdfCapture(): void {
   const webRequest = browserApi?.webRequest;
   const filterResponseData = webRequest?.filterResponseData;
   if (typeof filterResponseData !== "function" || !chrome.webRequest?.onBeforeRequest) {
-    console.warn("[ReferencePreviewer] Firefox PDF response capture unavailable");
+    console.warn("[Glimpse] Firefox PDF response capture unavailable");
     return;
   }
 
