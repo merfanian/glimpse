@@ -88,37 +88,72 @@ async function main(): Promise<void> {
   setStatus("Loading…");
   log("viewer loading", fileUrl);
 
-  try {
-    let doc: Awaited<ReturnType<typeof pdfjs.getDocument>["promise"]>;
-
-    if (fileUrl.startsWith("file://")) {
-      // Extension pages (moz-extension:// / chrome-extension://) cannot fetch
-      // file:// URLs directly due to cross-origin restrictions.  Route through
-      // the background script which runs with <all_urls> host permission and
-      // can read local files via XMLHttpRequest.
-      const resp = await chrome.runtime.sendMessage({ type: "fetchPdf", url: fileUrl });
-      if (!resp?.ok) {
-        throw new Error(
-          (resp?.error ?? "Background fetch failed") +
-            "\n\nFor local PDFs, enable 'Allow access to local files' for Glimpse in about:addons (Firefox) or 'Allow access to file URLs' in chrome://extensions (Chrome).",
-        );
-      }
-      const binary = atob(resp.pdf.dataBase64 as string);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      doc = await pdfjs.getDocument({ data: bytes, disableRange: true, disableStream: true }).promise;
-    } else {
-      doc = await pdfjs
-        .getDocument({ url: fileUrl, withCredentials: true, disableRange: true, disableStream: true })
-        .promise;
-    }
-
+  async function loadPdfBytes(bytes: Uint8Array): Promise<void> {
+    const doc = await pdfjs
+      .getDocument({ data: bytes, disableRange: true, disableStream: true })
+      .promise;
     pdfViewer.setDocument(doc);
     linkService.setDocument(doc, null);
     setStatus(`${doc.numPages} page(s)`);
-
-    // Reuse the loaded document for citation detection (no second download).
     startDetection("pdfjs", doc);
+  }
+
+  function showFilePicker(): void {
+    const overlay = document.getElementById("file-picker-overlay");
+    const hint = document.getElementById("file-picker-hint");
+    const input = document.getElementById("file-input") as HTMLInputElement;
+    if (!overlay || !hint || !input) return;
+
+    const filename = (fileUrl ?? "").split("/").pop() ?? "the PDF file";
+    hint.textContent = `Browsers block direct access to local files. Please select "${decodeURIComponent(filename)}" to open it in Glimpse.`;
+    overlay.classList.remove("hidden");
+    setStatus("Choose file to open");
+
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      overlay.classList.add("hidden");
+      setStatus("Loading…");
+      const reader = new FileReader();
+      reader.onload = () => {
+        const buf = reader.result as ArrayBuffer;
+        loadPdfBytes(new Uint8Array(buf)).catch((err: unknown) => {
+          setStatus(`Failed to load PDF: ${String((err as Error)?.message ?? err)}`);
+        });
+      };
+      reader.onerror = () => setStatus("Failed to read file");
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  try {
+    if (fileUrl.startsWith("file://")) {
+      // Browsers sandbox extension pages from file:// URLs.
+      // Try the background script first (works in Chrome with "Allow access to file URLs").
+      // Fall back to the file picker on failure (works everywhere, no permissions needed).
+      let loaded = false;
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: "fetchPdf", url: fileUrl });
+        if (resp?.ok) {
+          const binary = atob(resp.pdf.dataBase64 as string);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          await loadPdfBytes(bytes);
+          loaded = true;
+        }
+      } catch {
+        // Background fetch failed — fall through to file picker
+      }
+      if (!loaded) showFilePicker();
+    } else {
+      const doc = await pdfjs
+        .getDocument({ url: fileUrl, withCredentials: true, disableRange: true, disableStream: true })
+        .promise;
+      pdfViewer.setDocument(doc);
+      linkService.setDocument(doc, null);
+      setStatus(`${doc.numPages} page(s)`);
+      startDetection("pdfjs", doc);
+    }
   } catch (err) {
     errorLog("viewer failed to load PDF", err);
     setStatus(`Failed to load PDF: ${String((err as Error)?.message ?? err)}`);

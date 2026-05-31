@@ -16,6 +16,26 @@
     <div id="viewerContainer">
       <div id="viewer" class="pdfViewer"></div>
     </div>
+    <!-- Shown when browser blocks direct access to a local file:// PDF -->
+    <div id="file-picker-overlay" class="hidden">
+      <div id="file-picker-card">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <h2>Open local PDF</h2>
+        <p id="file-picker-hint"></p>
+        <label id="file-picker-label" for="file-input">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          Choose file…
+        </label>
+        <input type="file" id="file-input" accept=".pdf,application/pdf" />
+      </div>
+    </div>
     <script src="viewer.js"></script>
   </body>
 </html>
