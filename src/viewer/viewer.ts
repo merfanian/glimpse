@@ -95,11 +95,6 @@ async function main(): Promise<void> {
   const fileUrl = getFileParam();
   const titleEl = document.getElementById("doc-title");
 
-  if (!localKey && !fileUrl) {
-    setStatus("No PDF specified. Open a PDF via the Glimpse toolbar button.");
-    return;
-  }
-
   // ── Toolbar controls ──
   const btnPrev = document.getElementById("btn-prev") as HTMLButtonElement;
   const btnNext = document.getElementById("btn-next") as HTMLButtonElement;
