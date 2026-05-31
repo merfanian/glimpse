@@ -336,7 +336,19 @@ function ResizeGrip({ panelRef }: { panelRef: preact.RefObject<HTMLDivElement> }
     };
   }, [panelRef]);
 
-  return <div class="rp-resize-grip" ref={gripRef} />;
+  return (
+    <div class="rp-resize-grip" ref={gripRef} title="Drag to resize" aria-hidden="true">
+      {/* 6-dot triangular grip — dots cluster toward bottom-left, indicating SW drag */}
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+        <circle cx="2.5" cy="11.5" r="1.25"/>
+        <circle cx="6.5" cy="11.5" r="1.25"/>
+        <circle cx="10.5" cy="11.5" r="1.25"/>
+        <circle cx="2.5" cy="7.5"  r="1.25"/>
+        <circle cx="6.5" cy="7.5"  r="1.25"/>
+        <circle cx="2.5" cy="3.5"  r="1.25"/>
+      </svg>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

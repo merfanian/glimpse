@@ -146,6 +146,8 @@ export class CitationDetector {
   private currentAnchor: HTMLElement | null = null;
   private lastX = 0;
   private lastY = 0;
+  /** Timestamp (ms) of the last showTooltip call. Used to debounce anchor switches. */
+  private tooltipShownAt = 0;
 
   constructor(
     private readonly env: Environment,
@@ -373,13 +375,26 @@ export class CitationDetector {
 
     if (!this.isKnownReference(anchor, me.clientX, me.clientY)) return;
 
+    // If the tooltip was shown recently for a DIFFERENT anchor, ignore this event.
+    // The user is likely moving their cursor toward the already-visible tooltip
+    // and is inadvertently crossing an adjacent reference link. Switching the
+    // tooltip immediately in that window would cause it to jump unpredictably.
+    const SWITCH_LOCK_MS = 500;
+    if (anchor !== this.currentAnchor && Date.now() - this.tooltipShownAt < SWITCH_LOCK_MS) {
+      return;
+    }
+
     this.currentAnchor = anchor;
+    this.tooltipShownAt = Date.now();
     this.cb.showTooltip(anchor.getBoundingClientRect());
   };
 
   private handlePointerOut = (e: Event): void => {
     const target = e.target as Element | null;
-    if (target && this.citationAnchor(target)) {
+    if (target && this.citationAnchor(target) === this.currentAnchor) {
+      // Only schedule hide (and reset tracking) when leaving the anchor that owns
+      // the current tooltip, not every anchor in the document.
+      this.currentAnchor = null;
       this.cb.hideTooltip();
     }
   };
