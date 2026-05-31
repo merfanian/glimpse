@@ -177,31 +177,41 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
     return bands.flatMap((b) => b.sort((a, c) => a.x - c.x));
   }
 
-  // Detect a column separator X by finding the largest gap in line-start X positions.
-  // Returns null if no clear two-column structure is found (gap < 40 pts).
+  // Detect a column separator X using a balanced-gap algorithm on item X positions.
+  //
+  // The previous line-min-X approach fails for PDFs where left and right column items
+  // share the same Y coordinate (common in IEEE/ACM two-column papers) — both columns
+  // get merged into the same Y-band and only the leftmost X survives.
+  //
+  // Instead, we bucket ALL item X positions into 10 pt slots, find all gaps ≥ 15 pt,
+  // and score each candidate separator by (gap × balance-ratio). The balance-ratio
+  // is min(left_count, right_count) / max(left_count, right_count) and ensures we
+  // only accept separators where BOTH sides are substantially populated — rejecting
+  // false positives caused by sparse page numbers or stray items.
   function detectColumnSeparator(items: Array<{ x: number; y: number; str: string }>): number | null {
-    const lineMinX: number[] = [];
-    let lineY: number | null = null;
-    let minX = Infinity;
-    for (const it of items) {
-      if (lineY === null || Math.abs(it.y - lineY) > 3) {
-        if (minX !== Infinity) lineMinX.push(minX);
-        lineY = it.y;
-        minX = it.x;
-      } else {
-        minX = Math.min(minX, it.x);
+    if (items.length < 20) return null;
+    const xBuckets = [...new Set(items.map((i) => Math.round(i.x / 10) * 10))].sort((a, b) => a - b);
+    if (xBuckets.length < 4) return null;
+
+    let bestScore = 0;
+    let bestSep: number | null = null;
+
+    for (let i = 1; i < xBuckets.length; i++) {
+      const gap = xBuckets[i] - xBuckets[i - 1];
+      if (gap < 15) continue;
+      const sep = (xBuckets[i - 1] + xBuckets[i]) / 2;
+      const leftCount = items.filter((it) => it.x < sep).length;
+      const rightCount = items.filter((it) => it.x >= sep).length;
+      if (leftCount < 10 || rightCount < 10) continue; // one side too sparse
+      const ratio = Math.min(leftCount, rightCount) / Math.max(leftCount, rightCount);
+      if (ratio < 0.25) continue; // too unbalanced (e.g. [N] markers vs. full column)
+      const score = gap * ratio;
+      if (score > bestScore) {
+        bestScore = score;
+        bestSep = sep;
       }
     }
-    if (minX !== Infinity) lineMinX.push(minX);
-    if (lineMinX.length < 4) return null;
-    const sorted = [...lineMinX].sort((a, b) => a - b);
-    let maxGap = 0;
-    let sep = -1;
-    for (let i = 1; i < sorted.length; i++) {
-      const gap = sorted[i] - sorted[i - 1];
-      if (gap > maxGap) { maxGap = gap; sep = (sorted[i - 1] + sorted[i]) / 2; }
-    }
-    return maxGap >= 40 ? sep : null;
+    return bestSep;
   }
 
   async function resolveDest(
@@ -237,8 +247,11 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
 
     const startY = top == null ? viewport.height : top;
 
-    // Detect column separator from ALL page items for reliable gap detection.
-    const sep = left !== null ? detectColumnSeparator(items) : null;
+    // Detect column separator using items in the reference-section region only
+    // (items at or below the destination Y). Using the full page inflates the X
+    // distribution with headers, footers, and body-text items that can mask the gap.
+    const regionItems = items.filter((i) => i.y <= startY + 3);
+    const sep = left !== null ? detectColumnSeparator(regionItems) : null;
 
     // Apply column filter BEFORE band-sort.
     // Both columns: use `left - COL_MARGIN` as the lower-X bound to exclude items

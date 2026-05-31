@@ -83,6 +83,30 @@ describe("parseReference — title extraction", () => {
     );
     expect(ref.title).toBeTruthy();
     expect(ref.title!.toLowerCase()).toContain("deepseek");
+    // Year must NOT be part of the extracted title
+    expect(ref.title).not.toMatch(/,\s*20\d{2}/);
+  });
+
+  it("extracts title from IEEE/CVPR numbered entry, not venue", () => {
+    const ref = parseReference(
+      "[37] O. Vinyals, L. Kaiser, T. Koo, S. Petrov, I. Sutskever, and G. Hinton. Grammar as a foreign language. In Advances in Neural Information Processing Systems, 2015.",
+    );
+    expect(ref.title).toBe("Grammar as a foreign language");
+  });
+
+  it("extracts title from ACL bare-year style (no parens)", () => {
+    const ref = parseReference(
+      "Alan Akbik, Duncan Blythe, and Roland Vollgraf. 2018. Contextual string embeddings for sequence labeling. In Proceedings of the 27th International Conference on Computational Linguistics, pages 1638-1649.",
+    );
+    expect(ref.title).toBe("Contextual string embeddings for sequence labeling");
+  });
+
+  it("does NOT extract venue text as title for numbered entries", () => {
+    const ref = parseReference(
+      "[11] K. He and J. Sun. Deep residual learning for image recognition. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition, pages 770-778, 2016.",
+    );
+    expect(ref.title).toBe("Deep residual learning for image recognition");
+    expect(ref.title).not.toMatch(/pages|Proceedings|770/i);
   });
 });
 
@@ -193,5 +217,20 @@ describe("isBibliographyEntry", () => {
     const ref = parseReference(raw);
     // destKey is an opaque array key — no prefix match
     expect(isBibliographyEntry('["num",42,"XYZ",72,650,0]', ref)).toBe(false);
+  });
+
+  it("accepts truncated numbered entry without year (e.g. text cut off at page boundary)", () => {
+    // Entry text may be truncated and not contain the year, but the [N] marker is enough.
+    const ref = parseReference(
+      "[14] Y. Bengio, P. Simard, and P. Frasconi. Learning long-term dependen-",
+    );
+    expect(isBibliographyEntry("bib.14", ref)).toBe(true);
+  });
+
+  it("accepts ACL-style bare-year entry", () => {
+    const ref = parseReference(
+      "Alan Akbik, Duncan Blythe, and Roland Vollgraf. 2018. Contextual string embeddings for sequence labeling. In Proceedings of COLING, pages 1638-1649.",
+    );
+    expect(isBibliographyEntry("cite.akbik2018contextual", ref)).toBe(true);
   });
 });

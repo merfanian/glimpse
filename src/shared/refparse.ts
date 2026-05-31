@@ -17,32 +17,70 @@ function normalizeDoi(doi: string): string {
 }
 
 /**
+ * Returns true if the string looks like a venue/journal fragment rather than a
+ * paper title — used to avoid returning venue names from the segment scanner or
+ * the before-year pattern.
+ */
+function looksLikeVenueFragment(s: string): boolean {
+  return (
+    /^in\s+(proc(?:eedings)?|the\s+\d|advances|annual)/i.test(s) ||
+    /^(proceedings|advances\s+in|journal\s+of|transactions\s+on|workshop\s+on|arxiv\s+preprint)/i.test(s) ||
+    /^(pages?|pp\.)\s+\d/i.test(s) ||
+    /^vol(?:ume)?[\s.]*\d/i.test(s)
+  );
+}
+
+/**
  * Attempt to pull a title out of a reference string. Bibliography styles vary widely;
- * we use a couple of common signals (quoted titles, or the sentence following the
- * author/year block) and otherwise leave it undefined so callers can fall back to DOI.
+ * we use a cascade of heuristics in decreasing specificity order.
  */
 function guessTitle(raw: string): string | undefined {
-  const quoted = raw.match(/[“"]([^“”"]{8,})[”"]/);
+  // 1. Quoted title — most explicit signal, highest confidence.
+  const quoted = raw.match(/["\u201c\u201d]([^"\u201c\u201d]{8,})["\u201d]/);
   if (quoted) return clean(quoted[1]);
 
-  // Pattern: Authors (Year). Title. Venue...
+  // 2. Authors (Year). Title.  — APA / year-in-parens style.
   const afterYear = raw.match(/\((?:19|20)\d{2}[a-z]?\)\.?\s*([^.]{8,}?)\.\s/);
   if (afterYear) return clean(afterYear[1]);
 
-  // Pattern: Authors. Title, Year.  (NeurIPS/arXiv-style: "Smith et al. Great paper, 2024.")
-  const beforeYear = raw.match(/\.\s+([^.]{20,}?),\s*(?:19|20)\d{2}[a-z]?\s*\.?\s*$/);
-  if (beforeYear) return clean(beforeYear[1]);
+  // 3. Authors. YYYY[a]. Title.  — ACL/EMNLP bare-year style (no parens around year).
+  //    Matches "2018. Contextual string embeddings..." but NOT "2018." at end of string.
+  const aclStyle = raw.match(/\b(?:19|20)\d{2}[a-z]?\.\s+([^.]{8,})\./);
+  if (aclStyle) {
+    const cand = clean(aclStyle[1]);
+    if (!looksLikeVenueFragment(cand)) return cand;
+  }
 
-  // General: split on sentence boundaries, skipping short fragments (initials, "et al.").
-  // Handles references like "Y. K. Li et al. Long title here, 2024."
+  // 4. Sentence-boundary scan — reliable for numbered entries [N] Authors. Title. Venue.
+  //    Split on ". " boundaries; skip the first segment (authors/marker) and return the
+  //    first subsequent segment that looks like a title (long enough, has lowercase, not
+  //    a venue fragment). Strip a trailing ", YYYY" that may be part of the segment for
+  //    free-form styles like "Title, 2024".
   const segments = raw
     .split(/(?<=\.)\s+/)
     .map(clean)
     .filter(Boolean);
   for (let i = 1; i < segments.length; i++) {
-    const seg = segments[i];
-    if (seg.length >= 20 && /[a-z]/.test(seg) && !(/^\d/).test(seg)) return seg;
+    const stripped = clean(segments[i].replace(/,\s*(?:19|20)\d{2}[a-z]?\s*\.?\s*$/, ""));
+    if (
+      stripped.length >= 20 &&
+      /[a-z]/.test(stripped) &&
+      !/^\d/.test(stripped) &&
+      !looksLikeVenueFragment(stripped)
+    ) {
+      return stripped;
+    }
   }
+
+  // 5. Free-form: "Authors. Title, Year."  — NeurIPS / arXiv style where the title
+  //    comes before a trailing ", YYYY." at the end of the entry.  This fires last
+  //    because the segment scanner is more specific for structured entries.
+  const beforeYear = raw.match(/\.\s+([^.]{20,}?),\s*(?:19|20)\d{2}[a-z]?\s*\.?\s*$/);
+  if (beforeYear) {
+    const cand = clean(beforeYear[1]);
+    if (!looksLikeVenueFragment(cand)) return cand;
+  }
+
   return undefined;
 }
 
@@ -162,19 +200,23 @@ export function isBibliographyEntry(destKey: string, ref: ParsedReference): bool
   // Signal 3: definitive identifiers — accept immediately
   if (ref.doi || ref.arxivId) return true;
 
+  // Numbered entry marker ([N] or (N)) — accept regardless of year because the
+  // extracted text may be truncated and not include the trailing year/venue.
+  if (/^(\[\d+\]|\(\d+\))\s/.test(raw)) return true;
+
   // Signal 3 (continued): year is common in body text, so require it to appear in
   // a bibliography-style context: in parentheses "(YYYY)" (APA/MLA/Nature style),
   // OR accompanied by detected author names, OR at the end of an entry (NeurIPS/
-  // arXiv style — "..., YYYY."), OR the text starts with a numbered entry marker.
+  // arXiv style — "..., YYYY.").
   if (ref.year) {
     // Year in parentheses: "(2023)" or "(2023a)" — typical of most bib styles
     if (/\((?:19|20)\d{2}[a-z]?\)/.test(raw)) return true;
     // Parsed authors found: author-year entries
     if (ref.authors && ref.authors.length > 0) return true;
-    // Starts with a numbered entry marker: "[5]" or "(5)" — numbered bib styles
-    if (/^(\[\d+\]|\(\d+\))\s/.test(raw)) return true;
     // Year appears at the very end of the entry (e.g. "..., 2024." or "..., 2024")
     if (/,\s*(?:19|20)\d{2}[a-z]?\s*\.?\s*$/.test(raw)) return true;
+    // Bare year followed by period (ACL style): "Authors. 2018. Title."
+    if (/\b(?:19|20)\d{2}[a-z]?\.\s/.test(raw)) return true;
   }
 
   return false;
