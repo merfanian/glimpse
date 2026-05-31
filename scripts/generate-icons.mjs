@@ -1,51 +1,51 @@
-// Generates the manifest icons (48px, 128px) from assets/logo.svg.
-// Renders with rsvg-convert or Inkscape when available. If no renderer is
-// present (e.g. a bare CI runner), the committed PNGs in assets/icons/ are
-// reused, so the build never fails for lack of a rasteriser.
+// Generates the manifest icons from the source artwork assets/icons/glimpse.png.
+// Trims the surrounding whitespace and renders centred square PNGs at each size
+// using ImageMagick (`magick`/`convert`). When ImageMagick is unavailable (e.g.
+// a bare CI runner) the committed PNGs are reused so the build never fails.
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const svg = resolve(root, "assets/logo.svg");
+const src = resolve(root, "assets/icons/glimpse.png");
 const outDir = resolve(root, "assets/icons");
-const sizes = [48, 128];
+const sizes = [16, 32, 48, 128];
 
-function has(cmd) {
-  try {
-    execFileSync("sh", ["-c", `command -v ${cmd}`], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
+function magickCmd() {
+  for (const cmd of ["magick", "convert"]) {
+    try {
+      execFileSync("sh", ["-c", `command -v ${cmd}`], { stdio: "ignore" });
+      return cmd;
+    } catch {
+      /* keep looking */
+    }
   }
+  return null;
 }
 
-function render(size, out) {
-  if (has("rsvg-convert")) {
-    execFileSync("rsvg-convert", ["-w", String(size), "-h", String(size), svg, "-o", out]);
-    return true;
-  }
-  if (has("inkscape")) {
-    execFileSync("inkscape", [svg, "-w", String(size), "-h", String(size), "-o", out]);
-    return true;
-  }
-  return false;
-}
-
+const cmd = magickCmd();
 let rendered = 0;
+
 for (const size of sizes) {
   const out = resolve(outDir, `icon-${size}.png`);
-  if (render(size, out)) {
+  if (cmd && existsSync(src)) {
+    execFileSync(cmd, [
+      src,
+      "-fuzz", "6%", "-trim", "+repage",
+      "-resize", `${size}x${size}`,
+      "-background", "white", "-gravity", "center", "-extent", `${size}x${size}`,
+      "-strip", out,
+    ]);
     rendered++;
   } else if (!existsSync(out)) {
-    console.error(`[icons] no SVG renderer and missing ${out}. Install librsvg2-bin or Inkscape.`);
+    console.error(`[icons] ImageMagick not found and missing ${out}. Install imagemagick.`);
     process.exit(1);
   }
 }
 
 console.log(
   rendered === sizes.length
-    ? "[icons] rendered 48px and 128px icons from assets/logo.svg"
-    : "[icons] no renderer found; using committed PNG icons"
+    ? `[icons] rendered ${sizes.join(", ")}px icons from glimpse.png`
+    : "[icons] ImageMagick not found; using committed PNG icons"
 );

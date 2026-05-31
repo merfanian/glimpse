@@ -78,6 +78,8 @@ function buildManifest() {
     version: pkg.version,
     description: pkg.description,
     icons: {
+      16: "icons/icon-16.png",
+      32: "icons/icon-32.png",
       48: "icons/icon-48.png",
       128: "icons/icon-128.png",
     },
@@ -87,6 +89,8 @@ function buildManifest() {
       default_title: "Glimpse — PDF Preview",
       default_popup: "popup.html",
       default_icon: {
+        16: "icons/icon-16.png",
+        32: "icons/icon-32.png",
         48: "icons/icon-48.png",
         128: "icons/icon-128.png",
       },
@@ -116,6 +120,7 @@ function buildManifest() {
           "tooltip.css",
           "pdf_viewer.css",
           "images/*",
+          "icons/*",
         ],
         matches: ["<all_urls>"],
       },
@@ -181,11 +186,11 @@ function copyStatic() {
   copyFileSync(resolve(root, "src/popup/popup.html"), resolve(outdir, "popup.html"));
   copyFileSync(resolve(root, "src/popup/popup.css"), resolve(outdir, "popup.css"));
 
-  // Icons (optional placeholders)
+  // Icons (rendered from glimpse.png by scripts/generate-icons.mjs)
   const iconsDir = resolve(root, "assets/icons");
   if (existsSync(iconsDir)) {
     mkdirSync(resolve(outdir, "icons"), { recursive: true });
-    for (const size of [48, 128]) {
+    for (const size of [16, 32, 48, 128]) {
       const src = resolve(iconsDir, `icon-${size}.png`);
       if (existsSync(src)) copyFileSync(src, resolve(outdir, `icons/icon-${size}.png`));
     }

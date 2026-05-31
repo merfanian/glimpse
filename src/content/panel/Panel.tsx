@@ -628,9 +628,14 @@ function PanelHeader({ title, onClose }: { title: string; onClose: () => void })
   }, []);
 
   const short = title.length > 80 ? title.slice(0, 80) + "…" : title;
+  const logoUrl =
+    typeof chrome !== "undefined" && chrome.runtime?.getURL
+      ? chrome.runtime.getURL("icons/icon-48.png")
+      : "";
 
   return (
     <div class="rp-header" ref={headerRef}>
+      {logoUrl && <img class="rp-header-logo" src={logoUrl} width="18" height="18" alt="" />}
       <span class="rp-header-title" title={title}>{short}</span>
       <button class="rp-close" onClick={onClose} aria-label="Close">✕</button>
     </div>

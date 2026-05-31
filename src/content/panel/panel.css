@@ -16,9 +16,9 @@
   flex-direction: column;
   background: #ffffff;
   color: #1f2328;
-  border: 1px solid #d0d7de;
+  border: 1px solid #d9e1f0;
   border-radius: 10px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 12px 34px rgba(11, 31, 58, 0.22);
   overflow: hidden;
   font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   z-index: 2147483647;
@@ -31,16 +31,24 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 12px;
-  background: #f6f8fa;
-  border-bottom: 1px solid #d0d7de;
+  background: #f5f8ff;
+  border-bottom: 1px solid #e2e8f5;
   cursor: move;
   user-select: none;
+  flex-shrink: 0;
+}
+
+.rp-header-logo {
+  display: block;
+  border-radius: 4px;
   flex-shrink: 0;
 }
 
 .rp-header-title {
   font-weight: 600;
   font-size: 13px;
+  color: #0b1f3a;
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -124,8 +132,8 @@
   align-items: center;
   gap: 8px;
   padding: 5px 12px;
-  border-bottom: 1px solid #eaeef2;
-  background: #f6f8fa;
+  border-bottom: 1px solid #e2e8f5;
+  background: #f5f8ff;
   flex-shrink: 0;
 }
 
@@ -147,7 +155,7 @@
 .rp-link-btn {
   border: none;
   background: transparent;
-  color: #1f6feb;
+  color: #2563eb;
   cursor: pointer;
   font-size: 11px;
   padding: 0;
@@ -178,7 +186,7 @@
 }
 
 .rp-alt:hover { background: #f6f8fa; }
-.rp-alt-active { background: #ddf4ff; }
+.rp-alt-active { background: #e0e9fd; }
 .rp-alt-conf { font-weight: 600; color: #57606a; }
 .rp-alt-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rp-alt-meta { color: #8c959f; }
@@ -272,8 +280,8 @@
   align-items: center;
   gap: 6px;
   padding: 7px 10px;
-  border-top: 1px solid #d0d7de;
-  background: #f6f8fa;
+  border-top: 1px solid #e2e8f5;
+  background: #f5f8ff;
   flex-shrink: 0;
   position: relative;
 }
@@ -312,7 +320,7 @@
 
 .rp-btn {
   border: 1px solid transparent;
-  background: #1f6feb;
+  background: #2563eb;
   color: #fff;
   padding: 5px 12px;
   border-radius: 6px;
@@ -321,13 +329,13 @@
   white-space: nowrap;
 }
 
-.rp-btn:hover:not(:disabled) { background: #1a5fd0; }
+.rp-btn:hover:not(:disabled) { background: #1d4ed8; }
 .rp-btn:disabled { opacity: 0.5; cursor: default; }
 
 .rp-btn-secondary {
-  background: #f6f8fa;
-  color: #1f2328;
-  border-color: #d0d7de;
+  background: #f5f8ff;
+  color: #0b1f3a;
+  border-color: #d9e1f0;
 }
 
-.rp-btn-secondary:hover:not(:disabled) { background: #eaeef2; }
+.rp-btn-secondary:hover:not(:disabled) { background: #eef3fe; }

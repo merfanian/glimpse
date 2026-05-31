@@ -28,8 +28,13 @@ function OptionsApp() {
 
   return (
     <div class="wrap">
-      <h1>Glimpse</h1>
-      <p class="sub">Preview cited papers by hovering citations in Overleaf and PDF viewers.</p>
+      <header class="brand">
+        <img class="brand-logo" src="icons/icon-128.png" width="44" height="44" alt="" />
+        <div class="brand-text">
+          <h1>Glimpse</h1>
+          <p class="sub">Preview cited papers by hovering citations in Overleaf and PDF viewers.</p>
+        </div>
+      </header>
 
       <section>
         <h2>Crossref polite pool</h2>
