@@ -440,14 +440,18 @@ function extractTextFromItems(
   // (e.g. a left-col journal name and a right-col [N] marker within 3 pts of Y) are
   // never grouped into the same line band.
   //
-  // For the LEFT column (left < sep): keep items to the left of the separator.
-  // For the RIGHT column (left >= sep): keep items within 40 pts of the destination's
-  // own X (`left`). Using `left - 40` instead of `sep` avoids misclassifying "gap"
-  // items (x=57..sep) that sit between the columns due to floating-point Y grouping.
+  // Both columns: use `left - COL_MARGIN` as the lower-X bound. This excludes
+  // items significantly to the left of the destination (e.g. ACL-style line numbers
+  // at x≈12 on the left margin when the left-column text starts at x≈70).
+  // For the RIGHT column the lower bound also excludes opposite-column content.
   const COL_MARGIN = 20;
   const colItems =
     sep !== null && left !== null
-      ? items.filter((i) => (left < sep ? i.x < sep : i.x >= left - COL_MARGIN))
+      ? items.filter((i) =>
+          left < sep
+            ? i.x >= left - COL_MARGIN && i.x < sep   // left col: clamp both sides
+            : i.x >= left - COL_MARGIN,                // right col: only lower bound needed
+        )
       : items;
 
   // Band-sort: group items within 3 pts of Y into the same line, sorted by X within
@@ -458,7 +462,10 @@ function extractTextFromItems(
   // Y filter: keep only items at or below the destination top.
   const below = sorted.filter((i) => i.y <= startY + 2);
 
-  // Group into lines by y proximity.
+  // Group into lines by y proximity, then strip leading/trailing pure-digit tokens.
+  // Some papers (e.g. ACL) print line numbers in the margins; after band-sort they
+  // land at the start (left margin, x≈12) or end (right margin, x≈566) of each line.
+  // Stripping them prevents false [N]-marker detection and garbled reference text.
   const lines: TextItem[] = [];
   for (const it of below) {
     const last = lines[lines.length - 1];
@@ -468,6 +475,13 @@ function extractTextFromItems(
       lines.push({ ...it });
     }
   }
+  for (const l of lines) {
+    // Strip margin line numbers: a run of 1-4 digits at the very start or end of a
+    // line that is otherwise non-numeric (e.g. "746 Vibhor..." → "Vibhor..." and
+    // "...Wen 808" → "...Wen"). A period immediately after the digits (e.g. "2021.")
+    // is NOT stripped because that is a year or section number, not a line number.
+    l.str = l.str.replace(/^\d{1,4} +(?=\D)/, "").replace(/ +\d{1,4}$/, "").trim();
+  }
 
   const collected: string[] = [];
   let prevY: number | null = null;
@@ -476,13 +490,19 @@ function extractTextFromItems(
   // Edge case: when line spacing equals the 8pt hyperref margin, the destination top
   // lands exactly on the previous entry's [N] marker. Skip any [N] within 1 pt of
   // startY — it belongs to the previous entry, not the target.
-  const hasNumberMarker = lines.some((l) => /^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(l.str.trim()));
+  //
+  // Restrict \d{1,3}\. (≤3 digits) so that years like "2021." never match as markers.
+  const MARKER_RE = /^(\[\d+\]|\(\d+\)|\d{1,3}\.)\s/;
+  const hasNumberMarker = lines.some((l) => MARKER_RE.test(l.str.trim()));
   let pastFirstMarker = !hasNumberMarker; // author-year style: start immediately
+  // For author-year format use a tighter gap threshold: entries are separated by
+  // ~15-20 pt gaps while in-entry line spacing is ~11 pt.
+  const gapThreshold = hasNumberMarker ? 28 : 14;
   for (const line of lines) {
     const text = line.str.trim();
     if (!text) continue;
     if (!pastFirstMarker) {
-      if (/^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(text)) {
+      if (MARKER_RE.test(text)) {
         if (startY - line.y <= 1) continue; // [N] at the very top of range → previous entry, skip
         pastFirstMarker = true;
       } else {
@@ -490,9 +510,9 @@ function extractTextFromItems(
       }
     }
     // Stop at the start of the next reference entry (e.g. "[12]", "(12)", "12.").
-    if (collected.length > 0 && /^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(text)) break;
-    // Stop on an unusually large vertical gap (new block/section).
-    if (prevY != null && prevY - line.y > 28 && collected.length > 0) break;
+    if (collected.length > 0 && MARKER_RE.test(text)) break;
+    // Stop on a vertical gap larger than the threshold.
+    if (prevY != null && prevY - line.y > gapThreshold && collected.length > 0) break;
     collected.push(text);
     prevY = line.y;
     if (collected.join(" ").length > 900) break;

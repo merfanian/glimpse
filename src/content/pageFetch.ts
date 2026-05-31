@@ -241,18 +241,24 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
     const sep = left !== null ? detectColumnSeparator(items) : null;
 
     // Apply column filter BEFORE band-sort.
-    // Left col (left < sep): keep items left of separator.
-    // Right col (left >= sep): keep items within 40 pts of the destination's X to
-    // exclude "gap" items that fall between columns due to floating-point Y grouping.
+    // Both columns: use `left - COL_MARGIN` as the lower-X bound to exclude items
+    // significantly left of the destination (e.g. ACL line numbers at x≈12).
     const COL_MARGIN = 20;
     const colItems =
       sep !== null && left !== null
-        ? items.filter((i) => (left < sep ? i.x < sep : i.x >= left - COL_MARGIN))
+        ? items.filter((i) =>
+            left < sep
+              ? i.x >= left - COL_MARGIN && i.x < sep
+              : i.x >= left - COL_MARGIN,
+          )
         : items;
 
     // Band-sort only within the target column, then Y-filter.
     const below = sortItemsIntoLines(colItems).filter((i) => i.y <= startY + 2);
 
+    // Assemble visual lines, then strip leading/trailing margin line numbers.
+    // ACL-style papers print line numbers at x≈12 (left margin) and x≈566 (right
+    // margin). After band-sort they appear at the start/end of assembled lines.
     const lines: Array<{ y: number; x: number; str: string }> = [];
     for (const it of below) {
       const last = lines[lines.length - 1];
@@ -262,29 +268,30 @@ if (!(window as BridgedWindow).__rpBridgeActive) {
         lines.push({ ...it });
       }
     }
+    for (const l of lines) {
+      l.str = l.str.replace(/^\d{1,4} +(?=\D)/, "").replace(/ +\d{1,4}$/, "").trim();
+    }
 
     const collected: string[] = [];
     let prevY: number | null = null;
-    // For [N]-style numbered references, the XYZ destination lands ~8 pts above the
-    // actual [N] marker, so the last line(s) of the previous entry may appear first.
-    // Edge case: when line spacing equals the 8pt hyperref margin, the destination top
-    // lands exactly on the previous entry's [N] marker. Skip any [N] within 1 pt of
-    // startY — it belongs to the previous entry, not the target.
-    const hasNumberMarker = lines.some((l) => /^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(l.str.trim()));
+    // Restrict to \d{1,3}\. so years like "2021." never match as [N]-style markers.
+    const MARKER_RE = /^(\[\d+\]|\(\d+\)|\d{1,3}\.)\s/;
+    const hasNumberMarker = lines.some((l) => MARKER_RE.test(l.str.trim()));
     let pastFirstMarker = !hasNumberMarker; // author-year style: start immediately
+    const gapThreshold = hasNumberMarker ? 28 : 14;
     for (const line of lines) {
       const text = line.str.trim();
       if (!text) continue;
       if (!pastFirstMarker) {
-        if (/^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(text)) {
+        if (MARKER_RE.test(text)) {
           if (startY - line.y <= 1) continue; // [N] at the very top of range → previous entry, skip
           pastFirstMarker = true;
         } else {
           continue; // skip pre-marker tail from previous entry
         }
       }
-      if (collected.length > 0 && /^(\[\d+\]|\(\d+\)|\d+\.)\s/.test(text)) break;
-      if (prevY != null && prevY - line.y > 28 && collected.length > 0) break;
+      if (collected.length > 0 && MARKER_RE.test(text)) break;
+      if (prevY != null && prevY - line.y > gapThreshold && collected.length > 0) break;
       collected.push(text);
       prevY = line.y;
       if (collected.join(" ").length > 900) break;
