@@ -198,6 +198,11 @@ Open the extension's options page to configure:
 Not built here. Safari requires a separate Xcode/macOS packaging step
 (`xcrun safari-web-extension-converter dist/chrome`). The MV3 source is largely compatible.
 
+## Privacy
+
+No servers, accounts, analytics or tracking. See [PRIVACY.md](PRIVACY.md) for exactly what is
+sent to the scholarly databases when you preview a citation.
+
 ## License
 
 MIT
