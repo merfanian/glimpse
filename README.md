@@ -107,16 +107,27 @@ Click the toolbar button on a supported page: the popup says whether Glimpse is 
 
 ## Build
 
-Requires Node 18+.
+Requires **Node 20.19+ or 22.12+** (the test runner's jsdom needs it; the build itself is
+plain esbuild). Any OS.
 
 ```bash
-npm install
-npm run build:chrome     # -> dist/chrome
-npm run build:firefox    # -> dist/firefox
+npm ci
+npm run build:chrome     # -> dist/chrome   (Chrome Web Store, Edge Add-ons)
+npm run build:firefox    # -> dist/firefox  (addons.mozilla.org)
 npm run package          # builds both and writes dist/<target>.zip
 npm run typecheck        # tsc --noEmit
+npm test                 # unit tests
 npm run watch            # rebuild Chrome target on change
+node scripts/build.mjs --target=firefox --dev   # unminified, with [Glimpse] debug logging
 ```
+
+Builds are deterministic: `npm ci && npm run build:firefox` reproduces the submitted Firefox
+package byte-for-byte. All third-party code comes from npm (`pdfjs-dist`, `preact`) and is
+bundled by esbuild; no code is downloaded at runtime.
+
+Icons are committed PNGs rendered from `assets/icons/glimpse.svg` (48/128px) and
+`glimpse-small.svg` (16/32px). After editing the SVGs, run `npm run icons` (needs
+ImageMagick with SVG support).
 
 The same Manifest V3 source builds for Chrome, Edge, and Firefox. The only per-browser
 difference is the background declaration (`service_worker` for Chrome/Edge, `scripts` plus a
@@ -129,8 +140,8 @@ CI (`.github/workflows/ci.yml`) type-checks, tests, and builds on every push/PR.
 Releases are automated by `.github/workflows/release.yml`. Push a version tag to cut one:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 The workflow takes the version from the tag, builds all three targets, attaches
