@@ -21,7 +21,22 @@ if (start < 0) {
 }
 let end = lines.findIndex((l, i) => i > start && /^## /.test(l));
 if (end < 0) end = lines.length;
-const body = lines.slice(start + 1, end).join("\n").trim();
+// GitHub renders newlines in release notes as line breaks, so re-join hard-wrapped lines:
+// a line continues the previous one unless it is blank, a heading, a list item, a quote,
+// a table row, or inside a code fence.
+const out = [];
+let inFence = false;
+for (const line of lines.slice(start + 1, end)) {
+  if (/^\s*```/.test(line)) inFence = !inFence;
+  const prev = out[out.length - 1];
+  const startsBlock = /^\s*($|#|[-*+] |\d+[.)] |>|\||```)/.test(line);
+  if (!inFence && !startsBlock && prev !== undefined && prev.trim() !== "" && !/^\s*(#|\||```)/.test(prev)) {
+    out[out.length - 1] = `${prev.trimEnd()} ${line.trim()}`;
+  } else {
+    out.push(line);
+  }
+}
+const body = out.join("\n").trim();
 if (!body) {
   console.error(`CHANGELOG.md section for ${version} is empty.`);
   process.exit(1);
