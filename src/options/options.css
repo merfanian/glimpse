@@ -1,137 +1,316 @@
+/* Glimpse settings page. Shares design tokens with the panel / popup / viewer. */
 :root {
-  --gl-accent: #2563eb;
-  --gl-accent-hover: #1d4ed8;
-  --gl-ink: #0b1f3a;
-  --gl-text: #1f2937;
-  --gl-muted: #5b6b85;
-  --gl-surface: #ffffff;
-  --gl-bg: #f5f8ff;
-  --gl-border: #e2e8f5;
-  --gl-tint: #eef3fe;
+  --g-accent: #4f46e5;
+  --g-accent-hover: #4338ca;
+  --g-accent-soft: #eef2ff;
+  --g-accent-ring: rgba(79, 70, 229, 0.3);
+  --g-ink: #0f172a;
+  --g-ink-2: #475569;
+  --g-ink-3: #94a3b8;
+  --g-line: #e2e8f0;
+  --g-line-2: #f1f5f9;
+  --g-surface: #ffffff;
+  --g-bg: #f8fafc;
+  --g-good: #047857;
+  --g-bad: #b91c1c;
+  --g-switch-off: #cbd5e1;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --g-accent: #818cf8;
+    --g-accent-hover: #a5b4fc;
+    --g-accent-soft: rgba(129, 140, 248, 0.12);
+    --g-accent-ring: rgba(129, 140, 248, 0.4);
+    --g-ink: #e2e8f0;
+    --g-ink-2: #a3b1c6;
+    --g-ink-3: #64748b;
+    --g-line: #273449;
+    --g-line-2: #1e293b;
+    --g-surface: #111a2e;
+    --g-bg: #0b1220;
+    --g-good: #34d399;
+    --g-bad: #f87171;
+    --g-switch-off: #334155;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  color: var(--gl-text);
-  background: var(--gl-bg);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+  color: var(--g-ink);
+  background:
+    radial-gradient(1200px 400px at 50% -200px, rgba(99, 102, 241, 0.12), transparent 70%),
+    var(--g-bg);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
-.wrap {
-  max-width: 620px;
-  margin: 32px auto;
-  padding: 24px 28px;
-  background: var(--gl-surface);
-  border: 1px solid var(--gl-border);
-  border-radius: 14px;
-  box-shadow: 0 6px 24px rgba(11, 31, 58, 0.06);
+.page {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 48px 20px 40px;
 }
 
+/* ── Brand header ── */
 .brand {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 20px;
+  gap: 16px;
+  margin-bottom: 28px;
 }
 
 .brand-logo {
   display: block;
-  border-radius: 10px;
+  border-radius: 13px;
   flex-shrink: 0;
+  box-shadow: 0 10px 24px -8px rgba(67, 56, 202, 0.5);
 }
 
 .brand-text {
+  flex: 1;
   min-width: 0;
 }
 
 h1 {
   margin: 0 0 2px;
-  font-size: 22px;
-  color: var(--gl-ink);
-  letter-spacing: -0.01em;
+  font-size: 26px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
 }
 
 .sub {
   margin: 0;
-  color: var(--gl-muted);
+  color: var(--g-ink-2);
 }
 
-section {
-  padding: 16px 0;
-  border-top: 1px solid var(--gl-border);
+.save-state {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.save-state:empty { display: none; }
+.save-saving { color: var(--g-ink-2); background: var(--g-line-2); }
+.save-saved { color: var(--g-good); background: color-mix(in srgb, var(--g-good) 12%, transparent); }
+.save-error { color: var(--g-bad); background: color-mix(in srgb, var(--g-bad) 12%, transparent); }
+
+/* ── Cards ── */
+.card {
+  margin-bottom: 16px;
+  padding: 20px 22px;
+  background: var(--g-surface);
+  border: 1px solid var(--g-line);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.card-head {
+  margin-bottom: 14px;
 }
 
 h2 {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 15px;
-  color: var(--gl-ink);
+  font-weight: 700;
+  letter-spacing: -0.005em;
 }
 
+.card-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--g-ink-2);
+}
+
+/* ── Choice cards (radio) ── */
+.choices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.choices-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+@media (max-width: 560px) {
+  .choices, .choices-2 { grid-template-columns: 1fr; }
+}
+
+.choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px 13px;
+  border: 1.5px solid var(--g-line);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.14s, background 0.14s, box-shadow 0.14s;
+}
+
+.choice:hover {
+  border-color: color-mix(in srgb, var(--g-accent) 45%, var(--g-line));
+}
+
+.choice-on {
+  border-color: var(--g-accent);
+  background: var(--g-accent-soft);
+  box-shadow: 0 0 0 3px var(--g-accent-ring);
+}
+
+.choice input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.choice:has(input:focus-visible) {
+  outline: 2px solid var(--g-accent);
+  outline-offset: 2px;
+}
+
+.choice-title {
+  font-weight: 650;
+  font-size: 13.5px;
+}
+
+.choice-on .choice-title { color: var(--g-accent); }
+
+.choice-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--g-ink-2);
+}
+
+/* ── Toggle rows ── */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 0;
+  border-top: 1px solid var(--g-line-2);
+  cursor: pointer;
+}
+
+.card-head + .toggle-row { border-top: none; padding-top: 2px; }
+
+.toggle-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.toggle-label {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.toggle-desc {
+  font-size: 12px;
+  color: var(--g-ink-2);
+}
+
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--g-switch-off);
+  cursor: pointer;
+  transition: background 0.18s;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.3);
+  transition: transform 0.18s cubic-bezier(0.3, 0.7, 0.4, 1.3);
+}
+
+.switch:checked {
+  background: var(--g-accent);
+}
+
+.switch:checked::after {
+  transform: translateX(16px);
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--g-accent-ring);
+  outline-offset: 2px;
+}
+
+/* ── Text field ── */
 .field {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-width: 360px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--g-line-2);
+}
+
+.field-label {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.field-label em {
+  font-style: normal;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--g-ink-3);
+  margin-left: 4px;
 }
 
 .field input {
-  padding: 8px 10px;
-  border: 1px solid var(--gl-border);
-  border-radius: 8px;
-  font-size: 14px;
-  color: var(--gl-text);
-  transition: border-color 0.12s, box-shadow 0.12s;
+  max-width: 360px;
+  padding: 9px 12px;
+  border: 1px solid var(--g-line);
+  border-radius: 9px;
+  background: var(--g-bg);
+  color: var(--g-ink);
+  font: inherit;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
 }
 
 .field input:focus {
   outline: none;
-  border-color: var(--gl-accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  border-color: var(--g-accent);
+  background: var(--g-surface);
+  box-shadow: 0 0 0 3px var(--g-accent-ring);
 }
 
 .hint {
-  margin: 8px 0 0;
   font-size: 12px;
-  color: var(--gl-muted);
+  color: var(--g-ink-3);
 }
 
-.check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  cursor: pointer;
-}
-
-.check input {
-  accent-color: var(--gl-accent);
-}
-
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-top: 20px;
-}
-
-.actions button {
-  background: var(--gl-accent);
-  color: #fff;
-  border: none;
-  padding: 9px 20px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.12s;
-}
-
-.actions button:hover {
-  background: var(--gl-accent-hover);
-}
-
-.saved {
-  color: #1a7f4b;
-  font-size: 13px;
-  font-weight: 500;
+.foot {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--g-ink-3);
 }

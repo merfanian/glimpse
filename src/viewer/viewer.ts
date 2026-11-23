@@ -3,10 +3,56 @@
 import * as pdfjs from "pdfjs-dist";
 import { EventBus, PDFViewer, PDFLinkService } from "pdfjs-dist/web/pdf_viewer.mjs";
 import { startDetection } from "../content/start";
+import { pdfWorkerReady } from "../content/pdfWorkerSetup";
+import { base64ToUint8Array } from "../content/pdfReference";
 import { log, errorLog } from "@shared/debug";
-import { idbPopPdf } from "@shared/idb";
+import { idbPopPdf, idbPutPdf } from "@shared/idb";
+import { sendMessage } from "@shared/messages";
+import type { FetchPdfRequest, FetchPdfResponse, OpenNativeRequest } from "@shared/messages";
 
-pdfjs.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.js");
+/** Read a file:// URL from this extension page. Works in Chrome/Edge when
+ * "Allow access to file URLs" is enabled; Firefox never allows it. */
+function readLocalFile(url: string): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", url, true);
+    xhr.responseType = "arraybuffer";
+    xhr.onload = () => {
+      const buf = xhr.response as ArrayBuffer | null;
+      if ((xhr.status === 0 || xhr.status === 200) && buf && buf.byteLength > 0) resolve(new Uint8Array(buf));
+      else reject(new Error(`HTTP ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("blocked"));
+    try {
+      xhr.send();
+    } catch (err) {
+      reject(err as Error);
+    }
+  });
+}
+
+function fileAccessHint(): Promise<string> {
+  return new Promise((resolve) => {
+    const generic =
+      "Browsers don't let extensions open local files directly. Choose the file below to open it in Glimpse.";
+    try {
+      if (__BROWSER__ !== "firefox" && chrome.extension?.isAllowedFileSchemeAccess) {
+        chrome.extension.isAllowedFileSchemeAccess((allowed) => {
+          resolve(
+            allowed
+              ? generic
+              : "To open local PDFs automatically, enable \u201cAllow access to file URLs\u201d on Glimpse's " +
+                  "extension details page. For now, choose the file below.",
+          );
+        });
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+    resolve(generic);
+  });
+}
 
 function getFileParam(): string | null {
   const raw = new URLSearchParams(location.search).get("file");
@@ -21,6 +67,28 @@ function getFileParam(): string | null {
 function setStatus(msg: string): void {
   const el = document.getElementById("status");
   if (el) el.textContent = msg;
+}
+
+/** Show a load failure with a way out to the browser's own viewer. */
+function setLoadError(msg: string, nativeUrl: string | null): void {
+  const el = document.getElementById("status");
+  if (!el) return;
+  el.textContent = `${msg} `;
+  if (nativeUrl && /^(https?|file):/i.test(nativeUrl)) {
+    const a = document.createElement("a");
+    a.href = "#";
+    a.textContent = "Open in browser's viewer";
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      openInBrowserViewer(nativeUrl);
+    });
+    el.appendChild(a);
+  }
+}
+
+function openInBrowserViewer(url: string): void {
+  // The background marks this tab+URL so it isn't redirected straight back here.
+  void sendMessage<OpenNativeRequest, never>({ type: "openNative", url });
 }
 
 // Zoom step used for +/- buttons (25% increments matching browser behaviour)
@@ -39,8 +107,7 @@ function formatZoomLabel(scale: number): string {
 }
 
 async function main(): Promise<void> {
-  const isPanelMode = new URLSearchParams(location.search).get("mode") === "panel";
-
+  await pdfWorkerReady;
   const container = document.getElementById("viewerContainer") as HTMLDivElement;
   const viewerEl = document.getElementById("viewer") as HTMLDivElement;
 
@@ -55,42 +122,9 @@ async function main(): Promise<void> {
   linkService.setViewer(pdfViewer);
 
   eventBus.on("pagesinit", () => {
-    pdfViewer.currentScaleValue = "page-width";
+    pdfViewer.currentScaleValue = "1"; // open at 100%
   });
 
-  // Panel/embedded mode: receive PDF data and fit-width commands via postMessage.
-  if (isPanelMode) {
-    document.body.classList.add("rp-panel-mode");
-    setStatus("Loading…");
-
-    window.addEventListener("message", (e) => {
-      if (e.data?.type === "loadPdf") {
-        setStatus("Rendering…");
-        try {
-          const binary = atob(e.data.base64 as string);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          pdfjs
-            .getDocument({ data: bytes, disableRange: true, disableStream: true })
-            .promise.then((doc) => {
-              pdfViewer.setDocument(doc);
-              linkService.setDocument(doc, null);
-              setStatus(`${doc.numPages} page${doc.numPages === 1 ? "" : "s"}`);
-            })
-            .catch((err: unknown) => {
-              setStatus(`Error: ${(err as Error).message ?? String(err)}`);
-            });
-        } catch (err) {
-          setStatus(`Decode error: ${(err as Error).message ?? String(err)}`);
-        }
-      } else if (e.data?.type === "fitWidth") {
-        pdfViewer.currentScaleValue = "page-width";
-      }
-    });
-    return;
-  }
-
-  // ── Full viewer mode ──
   const localKey = new URLSearchParams(location.search).get("localKey");
   const fileUrl = getFileParam();
   const titleEl = document.getElementById("doc-title");
@@ -231,14 +265,57 @@ async function main(): Promise<void> {
     updatePageUI(1, pdfViewer.pagesCount);
   });
 
-  async function loadPdfBytes(bytes: Uint8Array): Promise<void> {
-    const doc = await pdfjs
-      .getDocument({ data: bytes, disableRange: true, disableStream: true })
-      .promise;
+  let detectionStarted = false;
+
+  const btnDownload = document.getElementById("btn-download") as HTMLButtonElement;
+  const btnNative = document.getElementById("btn-native") as HTMLButtonElement;
+  let currentDoc: pdfjs.PDFDocumentProxy | null = null;
+  let downloadName = "document.pdf";
+
+  btnDownload.addEventListener("click", async () => {
+    if (!currentDoc) return;
+    const data = await currentDoc.getData();
+    const url = URL.createObjectURL(new Blob([data as Uint8Array<ArrayBuffer>], { type: "application/pdf" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = downloadName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  });
+
+  if (fileUrl && /^(https?|file):/i.test(fileUrl)) {
+    btnNative.classList.remove("hidden");
+    btnNative.addEventListener("click", () => openInBrowserViewer(fileUrl));
+  }
+
+  async function showDocument(doc: pdfjs.PDFDocumentProxy, fallbackName: string): Promise<void> {
+    currentDoc = doc;
+    downloadName = /\.pdf$/i.test(fallbackName) ? fallbackName : `${fallbackName}.pdf`;
+    btnDownload.disabled = false;
     pdfViewer.setDocument(doc);
     linkService.setDocument(doc, null);
     setStatus(`${doc.numPages} page${doc.numPages === 1 ? "" : "s"}`);
-    startDetection("pdfjs", doc);
+    if (!detectionStarted) {
+      detectionStarted = true;
+      startDetection("pdfjs", doc);
+    }
+    // Prefer the paper's real title over a URL fragment like "1706.03762".
+    try {
+      const meta = await doc.getMetadata();
+      const t = (meta.info as { Title?: string } | undefined)?.Title?.trim();
+      const name = t && t.length > 3 && !/^untitled|\.(dvi|tex|docx?)$/i.test(t) ? t : fallbackName;
+      if (titleEl) titleEl.textContent = name;
+      document.title = `${name} — Glimpse`;
+    } catch {
+      /* metadata is optional */
+    }
+  }
+
+  async function loadPdfBytes(bytes: Uint8Array, name = "PDF"): Promise<void> {
+    const doc = await pdfjs.getDocument({ data: bytes, disableRange: true, disableStream: true }).promise;
+    await showDocument(doc, name);
   }
 
   function showFilePicker(): void {
@@ -247,8 +324,7 @@ async function main(): Promise<void> {
     const input = document.getElementById("file-input") as HTMLInputElement;
     if (!overlay || !hint || !input) return;
 
-    const filename = (fileUrl ?? "").split("/").pop() ?? "the PDF file";
-    hint.textContent = `Browsers block direct access to local files. Please select "${decodeURIComponent(filename)}" to open it in Glimpse.`;
+    void fileAccessHint().then((h) => (hint.textContent = h));
     overlay.classList.remove("hidden");
     setStatus("Choose file to open");
 
@@ -260,7 +336,7 @@ async function main(): Promise<void> {
       const reader = new FileReader();
       reader.onload = () => {
         const buf = reader.result as ArrayBuffer;
-        loadPdfBytes(new Uint8Array(buf)).catch((err: unknown) => {
+        loadPdfBytes(new Uint8Array(buf), file.name).catch((err: unknown) => {
           setStatus(`Failed to load PDF: ${String((err as Error)?.message ?? err)}`);
         });
       };
@@ -290,7 +366,7 @@ async function main(): Promise<void> {
       document.title = `${file.name} — Glimpse`;
       if (titleEl) titleEl.textContent = file.name;
       const reader = new FileReader();
-      reader.onload = () => loadPdfBytes(new Uint8Array(reader.result as ArrayBuffer))
+      reader.onload = () => loadPdfBytes(new Uint8Array(reader.result as ArrayBuffer), file.name)
         .catch((err: unknown) => setStatus(`Failed to load: ${String((err as Error)?.message ?? err)}`));
       reader.onerror = () => setStatus("Failed to read file");
       reader.readAsArrayBuffer(file);
@@ -298,64 +374,86 @@ async function main(): Promise<void> {
 
     input.addEventListener("change", () => { if (input.files?.[0]) loadFromFile(input.files[0]); });
 
-    // Full page drag-and-drop on landing
-    document.addEventListener("dragover", (e) => e.preventDefault());
-    document.addEventListener("drop", (e) => {
-      e.preventDefault();
-      const file = e.dataTransfer?.files[0];
-      if (file) loadFromFile(file);
-    });
     return;
   }
 
   if (localKey) {
     try {
       const entry = await idbPopPdf(localKey);
-      if (!entry) throw new Error("PDF not found — it may have expired, please try again");
+      if (!entry) throw new Error("this file link has expired — open the file again from the Glimpse button");
       if (titleEl) titleEl.textContent = entry.name;
       document.title = `${entry.name} — Glimpse`;
-      await loadPdfBytes(entry.data);
+      await loadPdfBytes(entry.data, entry.name);
     } catch (err) {
       errorLog("viewer failed to load local PDF", err);
       setStatus(`Failed to load PDF: ${String((err as Error)?.message ?? err)}`);
     }
   } else if (fileUrl) {
-    if (titleEl) titleEl.textContent = decodeURIComponent(fileUrl.split("/").pop() || "PDF");
-    document.title = `${titleEl?.textContent ?? "PDF"} — Glimpse`;
+    let name = "PDF";
     try {
-      if (fileUrl.startsWith("file://")) {
-        // Browsers sandbox extension pages from file:// URLs.
-        // Try the background script first (works in Chrome with "Allow access to file URLs").
-        // Fall back to the file picker on failure (works everywhere, no permissions needed).
-        let loaded = false;
+      name = decodeURIComponent(new URL(fileUrl).pathname.split("/").pop() || "PDF");
+    } catch {
+      /* keep default */
+    }
+    if (titleEl) titleEl.textContent = name;
+    document.title = `${name} — Glimpse`;
+    try {
+      if (fileUrl.startsWith("file:")) {
+        let bytes: Uint8Array | null = null;
         try {
-          const resp = await chrome.runtime.sendMessage({ type: "fetchPdf", url: fileUrl });
-          if (resp?.ok) {
-            const binary = atob(resp.pdf.dataBase64 as string);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-            await loadPdfBytes(bytes);
-            loaded = true;
-          }
+          bytes = await readLocalFile(fileUrl);
         } catch {
-          // Background fetch failed — fall through to file picker
+          const resp = await sendMessage<FetchPdfRequest, FetchPdfResponse>({ type: "fetchPdf", urls: [fileUrl] });
+          if (resp.ok && resp.pdf.dataBase64) bytes = base64ToUint8Array(resp.pdf.dataBase64);
         }
-        if (!loaded) showFilePicker();
+        if (bytes) await loadPdfBytes(bytes, name);
+        else showFilePicker();
       } else {
-        const doc = await pdfjs
-          .getDocument({ url: fileUrl, withCredentials: true, disableRange: true, disableStream: true })
-          .promise;
-        pdfViewer.setDocument(doc);
-        linkService.setDocument(doc, null);
-        setStatus(`${doc.numPages} page${doc.numPages === 1 ? "" : "s"}`);
-        startDetection("pdfjs", doc);
+        let doc: pdfjs.PDFDocumentProxy;
+        try {
+          const task = pdfjs.getDocument({ url: fileUrl, withCredentials: true, disableRange: true, disableStream: true });
+          task.onProgress = ({ loaded, total }: { loaded: number; total: number }) => {
+            if (total > 0) setStatus(`Loading… ${Math.min(99, Math.round((loaded / total) * 100))}%`);
+          };
+          doc = await task.promise;
+        } catch (err) {
+          // e.g. CORS / missing host permission in this page: let the background fetch it.
+          log("direct load failed, retrying via background:", err);
+          setStatus("Loading…");
+          const resp = await sendMessage<FetchPdfRequest, FetchPdfResponse>({ type: "fetchPdf", urls: [fileUrl] });
+          if (!resp.ok || !resp.pdf.dataBase64) throw new Error(resp.ok ? "empty response" : resp.error);
+          doc = await pdfjs.getDocument({
+            data: base64ToUint8Array(resp.pdf.dataBase64),
+            disableRange: true,
+            disableStream: true,
+          }).promise;
+        }
+        await showDocument(doc, name);
       }
     } catch (err) {
       errorLog("viewer failed to load PDF", err);
-      setStatus(`Failed to load PDF: ${String((err as Error)?.message ?? err)}`);
+      setLoadError(`Couldn't load this PDF (${String((err as Error)?.message ?? err)}).`, fileUrl);
     }
   }
 }
+
+// Dropping a PDF anywhere opens it here (instead of the browser navigating away).
+document.addEventListener("dragover", (e) => {
+  if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+});
+document.addEventListener("drop", (e) => {
+  const file = e.dataTransfer?.files[0];
+  if (!file) return;
+  e.preventDefault();
+  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") {
+    setStatus("That file isn't a PDF");
+    return;
+  }
+  void file.arrayBuffer().then(async (buf) => {
+    const key = await idbPutPdf(new Uint8Array(buf), file.name);
+    location.href = chrome.runtime.getURL(`viewer.html?localKey=${key}`);
+  });
+});
 
 void main();
 

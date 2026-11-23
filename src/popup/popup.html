@@ -7,90 +7,97 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <!-- Header -->
-    <div id="header">
+    <header id="header">
       <div id="logo">
-        <img id="logo-img" src="icons/icon-48.png" width="20" height="20" alt="" />
-        <span>Glimpse</span>
+        <img id="logo-img" src="icons/icon-48.png" width="26" height="26" alt="" />
+        <div class="logo-text">
+          <span class="logo-name">Glimpse</span>
+          <span class="logo-tag">Citation previews for papers</span>
+        </div>
       </div>
-      <button id="btn-settings" title="Settings" class="icon-btn">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button id="btn-settings" title="Settings" aria-label="Settings" class="icon-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
       </button>
-    </div>
+    </header>
 
-    <!-- Current tab PDF action (shown only when tab is a PDF) -->
-    <div id="section-current" class="hidden">
-      <button id="btn-open-current" class="action-btn primary">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-          <circle cx="11" cy="14" r="3"/><line x1="17" y1="20" x2="14.1" y2="17.1"/>
-        </svg>
-        <div class="btn-text">
-          <span class="btn-title">Open in Glimpse</span>
-          <span id="current-filename" class="btn-sub"></span>
-        </div>
-        <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="9 18 15 12 9 6"/>
-        </svg>
-      </button>
-    </div>
-
-    <!-- Divider (only when both sections visible) -->
-    <div id="section-divider" class="hidden">
-      <div class="divider-line"></div>
-      <span class="divider-label">or open a local file</span>
-      <div class="divider-line"></div>
-    </div>
-
-    <!-- Local file section -->
-    <div id="section-local">
-      <div
-        id="drop-zone"
-        role="button"
-        tabindex="0"
-        aria-label="Drop PDF here or click to choose"
-      >
-        <div id="drop-zone-idle">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-          </svg>
-          <p class="drop-title">Drop a PDF here</p>
-          <p class="drop-sub">or</p>
-          <label id="choose-label" for="file-input">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-            Choose file…
-          </label>
-        </div>
-        <div id="drop-zone-over" class="hidden">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="17 8 12 3 7 8"/>
-            <line x1="12" y1="3" x2="12" y2="15"/>
-          </svg>
-          <p class="drop-title">Release to open</p>
+    <main>
+      <!-- Firefox: host access was not granted / was revoked -->
+      <div id="section-permission" class="notice notice-warn hidden">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <div>
+          <p><strong>Glimpse needs access to websites</strong> to find citations in PDFs and look up papers.</p>
+          <button id="btn-grant" class="small-btn">Allow access</button>
         </div>
       </div>
-      <input type="file" id="file-input" accept=".pdf,application/pdf" />
-    </div>
 
-    <!-- Status / error message -->
-    <div id="status-bar" class="hidden">
-      <span id="status-text"></span>
-    </div>
+      <!-- Glimpse is running on this page -->
+      <div id="section-active" class="notice notice-ok hidden">
+        <span class="pulse" aria-hidden="true"></span>
+        <p><strong>Active on this page.</strong> Hover a citation in the PDF, then click <em>Preview</em>.</p>
+      </div>
 
-    <!-- Footer -->
-    <div id="footer">
+      <!-- Current tab PDF action (shown only when tab is a PDF) -->
+      <div id="section-current" class="hidden">
+        <button id="btn-open-current" class="action-btn">
+          <span class="action-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><circle cx="11" cy="14" r="3"/><line x1="17" y1="20" x2="14.1" y2="17.1"/></svg>
+          </span>
+          <span class="btn-text">
+            <span class="btn-title">Open this PDF in Glimpse</span>
+            <span id="current-filename" class="btn-sub"></span>
+          </span>
+          <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+
+      <div id="section-divider" class="hidden">
+        <div class="divider-line"></div>
+        <span class="divider-label">or open a local file</span>
+        <div class="divider-line"></div>
+      </div>
+
+      <!-- Local file -->
+      <div id="section-local">
+        <div id="drop-zone" role="button" tabindex="0" aria-label="Drop a PDF here or click to choose one">
+          <div id="drop-zone-idle">
+            <span class="drop-icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </span>
+            <p class="drop-title">Drop a PDF here</p>
+            <p class="drop-sub">or <label id="choose-label" for="file-input">choose a file</label></p>
+          </div>
+          <div id="drop-zone-over" class="hidden">
+            <span class="drop-icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </span>
+            <p class="drop-title">Release to open</p>
+          </div>
+        </div>
+        <input type="file" id="file-input" accept=".pdf,application/pdf" />
+      </div>
+
+      <div id="status-bar" class="hidden">
+        <span id="status-text"></span>
+      </div>
+
+      <!-- What to do with PDFs opened in the browser's built-in viewer -->
+      <section id="pdf-mode-section">
+        <p class="section-label" id="pdf-mode-label">When I open a PDF</p>
+        <div id="pdf-mode" class="segmented" role="radiogroup" aria-labelledby="pdf-mode-label">
+          <button role="radio" data-value="suggest" title="Offer to open PDFs in Glimpse">Suggest</button>
+          <button role="radio" data-value="auto" title="Always open PDFs in Glimpse">Always</button>
+          <button role="radio" data-value="off" title="Leave PDFs in the browser's viewer">Off</button>
+        </div>
+      </section>
+    </main>
+
+    <footer id="footer">
       <span id="version-label"></span>
-    </div>
+      <span class="footer-note">Runs locally · no account</span>
+    </footer>
 
     <script src="popup.js"></script>
   </body>

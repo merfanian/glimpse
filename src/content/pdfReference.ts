@@ -1,5 +1,6 @@
 // Loads the current document's PDF with pdf.js and extracts the bibliography entry
-// that a hovered internal (hyperref) citation link points to.
+// that a hovered internal (hyperref) citation link points to. Also hosts the client side
+// of the page main-world bridge (pageFetch.ts).
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { parseReference, isBibliographyEntry } from "@shared/refparse";
@@ -7,7 +8,10 @@ import type { ParsedReference } from "@shared/types";
 import { sendMessage } from "@shared/messages";
 import type { FetchPdfRequest, FetchPdfResponse } from "@shared/messages";
 import { pdfWorkerReady } from "./pdfWorkerSetup";
-import { log, warn } from "@shared/debug";
+import { destLeft, destTop, extractTextFromItems, type TextItem } from "@shared/bibExtract";
+
+export { destTop, extractTextFromItems } from "@shared/bibExtract";
+import { log } from "@shared/debug";
 
 export interface LinkAnnotationEntry {
   /** 1-based page where the citation link appears. */
@@ -34,222 +38,165 @@ interface SerializedReferenceIndex {
   byDest: Array<[string, ParsedReference]>;
 }
 
-function base64ToUint8Array(b64: string): Uint8Array {
+export function base64ToUint8Array(b64: string): Uint8Array {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
 
+export function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  }
+  return btoa(binary);
+}
+
 function describeError(err: unknown): string {
   return String((err as Error)?.message ?? err);
 }
 
-/**
- * Inject the page main-world fetch bridge (pageFetch.ts) as a <script> tag so it runs
- * in the host page's own JS compartment. This avoids Firefox Xray issues and lets the
- * bridge use the page's credentials for cross-site PDFs (e.g. Overleaf compile URLs).
- *
- * Runs once at module load; the bridge has its own guard against double-injection.
- */
-const bridgeReady: Promise<void> = (() => {
-  // Guard for test / non-extension environments where chrome is not available.
+// ── Page main-world bridge ──────────────────────────────────────────────────
+// pageFetch.ts runs in the host page's own JS context. It is injected lazily, only once
+// something actually needs it — never on pages that merely load the content script.
+
+let bridgePromise: Promise<void> | null = null;
+
+export function ensureBridge(): Promise<void> {
+  if (bridgePromise) return bridgePromise;
   if (typeof chrome === "undefined" || typeof chrome.runtime?.getURL !== "function") {
-    return Promise.resolve();
+    return (bridgePromise = Promise.resolve());
   }
-  return new Promise<void>((resolve) => {
+  bridgePromise = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
     script.src = chrome.runtime.getURL("pagefetch.js");
-    script.onload = () => resolve();
-    script.onerror = () => {
-      warn("failed to inject page-world bridge");
-      resolve(); // don't block; fall back to background fetch
+    script.onload = () => {
+      script.remove();
+      resolve();
     };
-    (document.documentElement ?? document.head ?? document.body).appendChild(script);
+    script.onerror = () => {
+      script.remove();
+      bridgePromise = null;
+      reject(new Error("The page blocked Glimpse's helper script"));
+    };
+    (document.head ?? document.documentElement).appendChild(script);
   });
-})();
+  return bridgePromise;
+}
+
+let callSeq = 0;
 
 /**
- * Fetch a PDF via the page's main-world bridge (see pageFetch.ts). Required for viewers
- * like Overleaf whose PDF lives on a separate registrable domain reachable only from the
- * page's own credentialed JS context.
+ * Request/response with the main-world bridge over window.postMessage. Payloads are
+ * plain data only (binary as base64) so nothing crosses Firefox's Xray boundary.
+ *
+ * NOTE: Don't check ev.source === window: in Firefox content scripts `window` is an Xray
+ * wrapper and is never === the event's source. The typed `source` + random id suffice.
  */
-function pageFetchPdf(url: string, timeoutMs = 15000): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const id = `rp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+export async function bridgeCall<T extends object>(
+  type: string,
+  payload: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<T> {
+  await ensureBridge();
+  return new Promise<T>((resolve, reject) => {
+    const id = `glimpse-${++callSeq}-${Math.random().toString(36).slice(2)}`;
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error("page-world fetch timed out"));
+      reject(new Error(`${type.toLowerCase()} timed out`));
     }, timeoutMs);
-
     function cleanup() {
       clearTimeout(timer);
       window.removeEventListener("message", onMessage);
     }
-
     function onMessage(ev: MessageEvent) {
-      // NOTE: Do NOT check ev.source === window here. In Firefox isolated content scripts,
-      // `window` is an Xray wrapper while `ev.source` is the raw page window — they are
-      // never === even for messages from the same window. Rely on the typed `source` field.
-      const d = ev.data as
-        | { source?: string; id?: string; ok?: boolean; base64?: string; error?: string }
-        | null;
-      if (!d || d.source !== "RP_PAGE_FETCH_RES" || d.id !== id) return;
+      const d = ev.data as ({ source?: string; id?: string; ok?: boolean; error?: string } & T) | null;
+      if (!d || d.source !== `${type}_RES` || d.id !== id) return;
       cleanup();
-      if (!d.ok) {
-        reject(new Error(d.error ?? "page-world fetch failed"));
-        return;
-      }
-      if (!d.base64) {
-        reject(new Error("page-world fetch returned no data"));
-        return;
-      }
-      resolve(base64ToUint8Array(d.base64));
+      if (!d.ok) reject(new Error(d.error ?? `${type} failed`));
+      else resolve(d);
     }
-
     window.addEventListener("message", onMessage);
-    window.postMessage({ source: "RP_PAGE_FETCH_REQ", id, url }, "*");
+    window.postMessage({ source: `${type}_REQ`, id, ...payload }, "*");
   });
 }
 
+/**
+ * Build the reference index inside the page's main world, reusing the page's already
+ * loaded pdf.js document when there is one. On Firefox, `pdfUrl` makes the bridge load
+ * the PDF itself (bytes pre-fetched by the background, e.g. from Overleaf capture).
+ */
 export async function buildReferenceIndexFromPage(
   pdfUrl?: string,
   timeoutMs = 20000,
 ): Promise<ReferenceIndex> {
-  // For Firefox with a URL: pre-fetch bytes via the background (which uses pdfCapture's
-  // assembled range chunks). Overleaf CDN URLs can't be XHR'd from MAIN world due to CORS,
-  // but the background service worker already has the bytes intercepted from the browser load.
   let pdfDataBase64: string | undefined;
-  if (pdfUrl && __BROWSER__ === "firefox" && typeof chrome !== "undefined") {
-    try {
-      const resp = (await sendMessage<FetchPdfRequest, FetchPdfResponse>({
-        type: "fetchPdf",
-        url: pdfUrl,
-      })) as { ok: boolean; pdf?: { dataBase64: string } };
-      if (resp.ok && resp.pdf?.dataBase64) pdfDataBase64 = resp.pdf.dataBase64;
-    } catch {
-      // Background unavailable or capture not ready; let pageFetch try its own fetch.
-    }
+  if (pdfUrl && __BROWSER__ === "firefox") {
+    const resp = await sendMessage<FetchPdfRequest, FetchPdfResponse>({ type: "fetchPdf", urls: [pdfUrl] });
+    if (resp.ok && resp.pdf.dataBase64) pdfDataBase64 = resp.pdf.dataBase64;
   }
-
-  return new Promise((resolve, reject) => {
-    const id = `rp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("page-context reference indexing timed out"));
-    }, timeoutMs);
-
-    function cleanup() {
-      clearTimeout(timer);
-      window.removeEventListener("message", onMessage);
-    }
-
-    function onMessage(ev: MessageEvent) {
-      const d = ev.data as
-        | { source?: string; id?: string; ok?: boolean; index?: SerializedReferenceIndex; error?: string }
-        | null;
-      if (!d || d.source !== "RP_PAGE_INDEX_RES" || d.id !== id) return;
-      cleanup();
-      if (!d.ok) {
-        reject(new Error(d.error ?? "page-context reference indexing failed"));
-        return;
-      }
-      if (!d.index) {
-        reject(new Error("page-context reference indexing returned no data"));
-        return;
-      }
-      resolve({
-        entries: d.index.entries,
-        pageSizes: new Map(d.index.pageSizes),
-        byDest: new Map(d.index.byDest),
-      });
-    }
-
-    window.addEventListener("message", onMessage);
-    void bridgeReady.then(() => {
-      window.postMessage({ source: "RP_PAGE_INDEX_REQ", id, pdfUrl, pdfDataBase64 }, "*");
-    });
-  });
+  const d = await bridgeCall<{ index?: SerializedReferenceIndex }>(
+    "RP_PAGE_INDEX",
+    { pdfUrl, pdfDataBase64 },
+    timeoutMs,
+  );
+  if (!d.index) throw new Error("page-context reference indexing returned no data");
+  return {
+    entries: d.index.entries,
+    pageSizes: new Map(d.index.pageSizes),
+    byDest: new Map(d.index.byDest),
+  };
 }
 
-export interface RenderedPdfPages {
-  pageUrls: string[];
-  pageDimensions: Array<{ cssWidth: number; cssHeight: number }>;
+// ── Main-world PDF rendering (Firefox content scripts) ──────────────────────
+// pdf.js rendering in Firefox's isolated content-script compartment silently produces
+// blank output (Xray wrappers break font loading / canvas internals), so the preview's
+// pages are rendered in the page's main world, one page at a time, as image blob URLs.
+
+export interface MainWorldDoc {
+  docId: string;
+  sizes: Array<{ width: number; height: number }>;
 }
 
-/**
- * Render a PDF's pages in the page's MAIN world (via pageFetch.ts bridge) and return
- * per-page blob URLs + CSS dimensions. Used exclusively by Firefox, where pdf.js rendering
- * in the isolated content-script compartment silently produces blank output due to Xray
- * wrapper restrictions on DOM APIs that pdf.js calls internally.
- */
-export function renderPdfPagesInMainWorld(
-  bytes: Uint8Array,
-  availableWidth: number,
-  timeoutMs = 120000,
-): Promise<RenderedPdfPages> {
-  return new Promise((resolve, reject) => {
-    const id = `rp-render-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("PDF rendering timed out"));
-    }, timeoutMs);
-
-    function cleanup() {
-      clearTimeout(timer);
-      window.removeEventListener("message", onMessage);
-    }
-
-    function onMessage(ev: MessageEvent) {
-      const d = ev.data as {
-        source?: string;
-        id?: string;
-        ok?: boolean;
-        pageUrls?: string[];
-        pageDimensions?: Array<{ cssWidth: number; cssHeight: number }>;
-        error?: string;
-      } | null;
-      if (!d || d.source !== "RP_PAGE_RENDER_RES" || d.id !== id) return;
-      cleanup();
-      if (!d.ok) {
-        reject(new Error(d.error ?? "PDF rendering failed"));
-        return;
-      }
-      resolve({
-        pageUrls: d.pageUrls ?? [],
-        pageDimensions: d.pageDimensions ?? [],
-      });
-    }
-
-    window.addEventListener("message", onMessage);
-
-    // Encode bytes to base64 in chunks to avoid call-stack overflow on large PDFs.
-    let base64: string;
-    {
-      let binary = "";
-      const chunkSize = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
-      }
-      base64 = btoa(binary);
-    }
-
-    void bridgeReady.then(() => {
-      window.postMessage(
-        { source: "RP_PAGE_RENDER_REQ", id, pdfDataBase64: base64, availableWidth },
-        "*",
-      );
-    });
-  });
+export async function mainWorldOpen(bytes: Uint8Array): Promise<MainWorldDoc> {
+  const d = await bridgeCall<{ docId?: string; sizes?: MainWorldDoc["sizes"] }>(
+    "RP_PAGE_OPEN",
+    { pdfDataBase64: uint8ArrayToBase64(bytes) },
+    60000,
+  );
+  if (!d.docId || !d.sizes) throw new Error("PDF could not be opened");
+  return { docId: d.docId, sizes: d.sizes };
 }
 
+export async function mainWorldRender(
+  docId: string,
+  pageNumber: number,
+  cssWidth: number,
+  dpr: number,
+): Promise<string> {
+  const d = await bridgeCall<{ url?: string }>(
+    "RP_PAGE_RENDER",
+    { docId, pageNumber, cssWidth, dpr },
+    30000,
+  );
+  if (!d.url) throw new Error("page render returned nothing");
+  return d.url;
+}
+
+export function mainWorldClose(docId: string): void {
+  void bridgeCall("RP_PAGE_CLOSE", { docId }, 5000).catch(() => undefined);
+}
+
+// ── Loading the document PDF in the content script ─────────────────────────
 
 async function getPdfData(url: string): Promise<Uint8Array> {
   const failures: string[] = [];
 
   // 1. Direct content-script fetch — works in Chrome/Edge via host permissions.
   try {
-    const res = await fetch(url, { credentials: "include" });
+    const res = await fetch(url, { credentials: "include", signal: AbortSignal.timeout(30000) });
     if (res.ok) return new Uint8Array(await res.arrayBuffer());
     failures.push(`HTTP ${res.status}`);
   } catch (err) {
@@ -258,14 +205,15 @@ async function getPdfData(url: string): Promise<Uint8Array> {
 
   // 2. Page main-world bridge — for cross-site PDFs (e.g. Overleaf signed compile URLs).
   try {
-    await bridgeReady;
-    return await pageFetchPdf(url);
+    const d = await bridgeCall<{ base64?: string }>("RP_PAGE_FETCH", { url }, 30000);
+    if (d.base64) return base64ToUint8Array(d.base64);
+    failures.push("bridge: no data");
   } catch (err) {
     failures.push(`bridge: ${describeError(err)}`);
   }
 
-  // 3. Background service worker — for public PDFs on external domains.
-  const resp = await sendMessage<FetchPdfRequest, FetchPdfResponse>({ type: "fetchPdf", url });
+  // 3. Background worker — for public PDFs on external domains.
+  const resp = await sendMessage<FetchPdfRequest, FetchPdfResponse>({ type: "fetchPdf", urls: [url] });
   if (!resp.ok) {
     throw new Error(`${resp.error}; earlier: ${failures.join("; ")}`);
   }
@@ -285,50 +233,6 @@ export async function loadDocument(url: string): Promise<PDFDocumentProxy> {
     isEvalSupported: false,
   });
   return task.promise;
-}
-
-/**
- * Extract the `top` (PDF user-space Y) from an explicit destination array, honoring the
- * destination's fit type. The top coordinate lives at a different index per type:
- *
- *   [ref, /XYZ,   left, top, zoom]            -> index 3
- *   [ref, /FitH,  top]                        -> index 2
- *   [ref, /FitBH, top]                        -> index 2
- *   [ref, /FitR,  left, bottom, right, top]   -> index 5
- *   [ref, /Fit | /FitV | /FitB | /FitBV, ...] -> no usable top (return null)
- */
-export function destTop(explicit: unknown[]): number | null {
-  const fit = explicit[1] as { name?: string } | string | undefined;
-  const name = typeof fit === "object" && fit ? fit.name : fit;
-  let idx: number;
-  switch (name) {
-    case "XYZ":
-      idx = 3;
-      break;
-    case "FitH":
-    case "FitBH":
-      idx = 2;
-      break;
-    case "FitR":
-      idx = 5;
-      break;
-    default:
-      return null;
-  }
-  const value = explicit[idx];
-  return typeof value === "number" ? value : null;
-}
-
-/**
- * Extract the `left` (PDF user-space X) from an explicit destination, if available.
- * Only XYZ [ref, /XYZ, left, top, zoom] and FitR [ref, /FitR, left, ...] carry a left.
- */
-function destLeft(explicit: unknown[]): number | null {
-  const fit = explicit[1] as { name?: string } | string | undefined;
-  const name = typeof fit === "object" && fit ? fit.name : fit;
-  if (name !== "XYZ" && name !== "FitR") return null;
-  const value = explicit[2]; // left is always at index 2 for both types
-  return typeof value === "number" ? value : null;
 }
 
 /** Resolve a pdf.js destination array/name to a concrete page index + top + left coordinates. */
@@ -352,173 +256,6 @@ async function resolveDest(
     return null;
   }
   return { pageIndex, top: destTop(explicit), left: destLeft(explicit) };
-}
-
-interface TextItem {
-  x: number;
-  y: number;
-  str: string;
-}
-
-/**
- * Sort text items into visual reading order (top-to-bottom, left-to-right).
- * Groups items within 3 pts of Y into the same "line band" and sorts by X ascending
- * within each band. This ensures reference markers like "[2]" (which may have a
- * slightly lower Y than the adjacent text due to PDF floating-point arithmetic)
- * still appear before the entry text in the output.
- */
-function sortItemsIntoLines(items: TextItem[]): TextItem[] {
-  const byY = [...items].sort((a, b) => b.y - a.y);
-  const bands: TextItem[][] = [];
-  for (const it of byY) {
-    const last = bands[bands.length - 1];
-    if (last && Math.abs(last[0].y - it.y) <= 3) last.push(it);
-    else bands.push([it]);
-  }
-  return bands.flatMap((b) => b.sort((a, c) => a.x - c.x));
-}
-
-/**
- * Detect a column separator X on a page by finding the largest horizontal gap
- * among the leftmost-X positions of each visual line.
- *
- * Returns the X separator if a gap > 40 pts is found (indicating two columns),
- * otherwise returns null (single-column layout).
- */
-function detectColumnSeparator(items: TextItem[]): number | null {
-  // Build visual lines (items already sorted y-desc, x-asc by callers)
-  const lineMinX: number[] = [];
-  let lineY: number | null = null;
-  let minX = Infinity;
-  for (const it of items) {
-    if (lineY === null || Math.abs(it.y - lineY) > 3) {
-      if (minX !== Infinity) lineMinX.push(minX);
-      lineY = it.y;
-      minX = it.x;
-    } else {
-      minX = Math.min(minX, it.x);
-    }
-  }
-  if (minX !== Infinity) lineMinX.push(minX);
-  if (lineMinX.length < 4) return null;
-
-  const sorted = [...lineMinX].sort((a, b) => a - b);
-  let maxGap = 0;
-  let separatorX = -1;
-  for (let i = 1; i < sorted.length; i++) {
-    const gap = sorted[i] - sorted[i - 1];
-    if (gap > maxGap) {
-      maxGap = gap;
-      separatorX = (sorted[i - 1] + sorted[i]) / 2;
-    }
-  }
-  return maxGap >= 40 ? separatorX : null;
-}
-
-/**
- * Extract the bibliography entry text starting at the destination position.
- * Collects lines starting at `top` (or page top when null), stopping at the next
- * reference marker or a large vertical gap.
- *
- * `left`: the X position from the destination (XYZ/FitR); used for column-aware
- * filtering on multi-column pages so items from an adjacent column are excluded.
- * Column filtering is applied BEFORE band-sorting so cross-column items at similar
- * Y values are never mixed into the same line band.
- */
-function extractTextFromItems(
-  items: TextItem[],
-  top: number | null,
-  pageHeight: number,
-  left: number | null,
-): string {
-  const startY = top ?? pageHeight;
-
-  // Detect column separator from ALL page items for reliable gap detection.
-  const sep = left !== null ? detectColumnSeparator(items) : null;
-
-  // Apply column filter BEFORE band-sort so cross-column items at similar Y values
-  // (e.g. a left-col journal name and a right-col [N] marker within 3 pts of Y) are
-  // never grouped into the same line band.
-  //
-  // Both columns: use `left - COL_MARGIN` as the lower-X bound. This excludes
-  // items significantly to the left of the destination (e.g. ACL-style line numbers
-  // at x≈12 on the left margin when the left-column text starts at x≈70).
-  // For the RIGHT column the lower bound also excludes opposite-column content.
-  const COL_MARGIN = 20;
-  const colItems =
-    sep !== null && left !== null
-      ? items.filter((i) =>
-          left < sep
-            ? i.x >= left - COL_MARGIN && i.x < sep   // left col: clamp both sides
-            : i.x >= left - COL_MARGIN,                // right col: only lower bound needed
-        )
-      : items;
-
-  // Band-sort: group items within 3 pts of Y into the same line, sorted by X within
-  // each band. This ensures [N] markers (x=57) precede entry text (x=70) even when
-  // their Y values differ by tiny floating-point amounts.
-  const sorted = sortItemsIntoLines(colItems);
-
-  // Y filter: keep only items at or below the destination top.
-  const below = sorted.filter((i) => i.y <= startY + 2);
-
-  // Group into lines by y proximity, then strip leading/trailing pure-digit tokens.
-  // Some papers (e.g. ACL) print line numbers in the margins; after band-sort they
-  // land at the start (left margin, x≈12) or end (right margin, x≈566) of each line.
-  // Stripping them prevents false [N]-marker detection and garbled reference text.
-  const lines: TextItem[] = [];
-  for (const it of below) {
-    const last = lines[lines.length - 1];
-    if (last && Math.abs(last.y - it.y) <= 3) {
-      last.str += (last.str.endsWith(" ") ? "" : " ") + it.str;
-    } else {
-      lines.push({ ...it });
-    }
-  }
-  for (const l of lines) {
-    // Strip margin line numbers: a run of 1-4 digits at the very start or end of a
-    // line that is otherwise non-numeric (e.g. "746 Vibhor..." → "Vibhor..." and
-    // "...Wen 808" → "...Wen"). A period immediately after the digits (e.g. "2021.")
-    // is NOT stripped because that is a year or section number, not a line number.
-    l.str = l.str.replace(/^\d{1,4} +(?=\D)/, "").replace(/ +\d{1,4}$/, "").trim();
-  }
-
-  const collected: string[] = [];
-  let prevY: number | null = null;
-  // For [N]-style numbered references, the XYZ destination lands ~8 pts above the
-  // actual [N] marker, so the last line(s) of the previous entry may appear first.
-  // Edge case: when line spacing equals the 8pt hyperref margin, the destination top
-  // lands exactly on the previous entry's [N] marker. Skip any [N] within 1 pt of
-  // startY — it belongs to the previous entry, not the target.
-  //
-  // Restrict \d{1,3}\. (≤3 digits) so that years like "2021." never match as markers.
-  const MARKER_RE = /^(\[\d+\]|\(\d+\)|\d{1,3}\.)\s/;
-  const hasNumberMarker = lines.some((l) => MARKER_RE.test(l.str.trim()));
-  let pastFirstMarker = !hasNumberMarker; // author-year style: start immediately
-  // For author-year format use a tighter gap threshold: entries are separated by
-  // ~15-20 pt gaps while in-entry line spacing is ~11 pt.
-  const gapThreshold = hasNumberMarker ? 28 : 14;
-  for (const line of lines) {
-    const text = line.str.trim();
-    if (!text) continue;
-    if (!pastFirstMarker) {
-      if (MARKER_RE.test(text)) {
-        if (startY - line.y <= 1) continue; // [N] at the very top of range → previous entry, skip
-        pastFirstMarker = true;
-      } else {
-        continue; // skip pre-marker tail from previous entry
-      }
-    }
-    // Stop at the start of the next reference entry (e.g. "[12]", "(12)", "12.").
-    if (collected.length > 0 && MARKER_RE.test(text)) break;
-    // Stop on a vertical gap larger than the threshold.
-    if (prevY != null && prevY - line.y > gapThreshold && collected.length > 0) break;
-    collected.push(text);
-    prevY = line.y;
-    if (collected.join(" ").length > 900) break;
-  }
-
-  return collected.join(" ").replace(/\s+/g, " ").trim();
 }
 
 const CONCURRENCY = 8;
@@ -602,6 +339,7 @@ export async function buildReferenceIndex(doc: PDFDocumentProxy): Promise<Refere
           .map((it) => ({
             x: (it["transform"] as number[])[4],
             y: (it["transform"] as number[])[5],
+            w: typeof it["width"] === "number" ? (it["width"] as number) : undefined,
             str: it["str"] as string,
           }));
         // Sort top-to-bottom (PDF y grows upward); within-line X ordering is handled
@@ -620,8 +358,8 @@ export async function buildReferenceIndex(doc: PDFDocumentProxy): Promise<Refere
   for (const [destKey, r] of resolvedDests) {
     const items = textContent.get(r.pageIndex);
     if (!items) continue;
-    const pageH = pageSizes.get(r.pageIndex + 1)?.height ?? 0;
-    const raw = extractTextFromItems(items, r.top, pageH, r.left);
+    const size = pageSizes.get(r.pageIndex + 1);
+    const raw = extractTextFromItems(items, r.top, size?.height ?? 0, r.left, size?.width ?? 0);
     if (!raw || raw.length < 8) continue;
     const ref = parseReference(raw);
     if (!isBibliographyEntry(destKey, ref)) continue;
@@ -656,14 +394,24 @@ export function findReferenceByHref(
 ): ParsedReference | null {
   if (!href || !href.startsWith("#")) return null;
   const raw = href.slice(1);
-  const decoded = (() => {
-    try {
-      return decodeURIComponent(raw);
-    } catch {
-      return raw;
-    }
-  })();
-  return index.byDest.get(decoded) ?? index.byDest.get(raw) ?? null;
+  const candidates = [raw];
+  // pdf.js builds these hrefs with the legacy escape(), not encodeURIComponent, so
+  // non-ASCII dest names ("cite.M%FCller") must be unescape()d; try both decoders.
+  try {
+    candidates.push(decodeURIComponent(raw));
+  } catch {
+    /* not valid UTF-8 percent-encoding */
+  }
+  try {
+    candidates.push(unescape(raw));
+  } catch {
+    /* ignore */
+  }
+  for (const key of candidates) {
+    const hit = index.byDest.get(key);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /**

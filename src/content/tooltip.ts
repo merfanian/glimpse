@@ -1,14 +1,19 @@
-// A small "Show preview" affordance shown next to a hovered citation link.
-// Rendered as a plain DOM element in the page (styled via tooltip.css).
+// The small "Preview" chip shown next to a hovered citation link. Lives in Glimpse's
+// shadow root (so page CSS can't touch it) and is positioned in viewport coordinates.
 export class PreviewTooltip {
   private el: HTMLDivElement;
   private hideTimer: number | null = null;
+  private hovered = false;
 
-  constructor(private readonly onActivate: () => void) {
+  constructor(
+    parent: ShadowRoot | HTMLElement,
+    private readonly onActivate: () => void,
+  ) {
     this.el = document.createElement("div");
     this.el.className = "rp-tooltip";
     this.el.setAttribute("role", "button");
-    this.el.tabIndex = 0;
+    this.el.setAttribute("aria-label", "Preview cited paper");
+    this.el.tabIndex = -1;
     this.el.innerHTML = `
       <div class="rp-tooltip-chip">
         <svg class="rp-tooltip-icon" width="13" height="13" viewBox="0 0 20 20"
@@ -20,34 +25,66 @@ export class PreviewTooltip {
         <span>Preview</span>
       </div>`;
 
-    this.el.addEventListener("click", (e) => {
+    const activate = (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
       this.hide(true);
       this.onActivate();
+    };
+    this.el.addEventListener("click", activate);
+    this.el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") activate(e);
     });
-    this.el.addEventListener("pointerenter", () => this.cancelHide());
-    this.el.addEventListener("pointerleave", () => this.scheduleHide());
+    // Don't let pdf.js / Overleaf treat a press on the chip as a text-selection start.
+    this.el.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.el.addEventListener("pointerenter", () => {
+      this.hovered = true;
+      this.cancelHide();
+    });
+    this.el.addEventListener("pointerleave", () => {
+      this.hovered = false;
+      this.scheduleHide();
+    });
 
-    document.documentElement.appendChild(this.el);
+    parent.appendChild(this.el);
   }
 
   show(anchor: DOMRect): void {
     this.cancelHide();
+    const wasVisible = this.isVisible();
 
-    this.el.style.top = `${window.scrollY + anchor.bottom + 6}px`;
-    this.el.style.left = `${window.scrollX + anchor.left}px`;
+    // Measure (visible but transparent) to clamp within the viewport.
+    this.el.classList.add("rp-tooltip-measure");
+    const w = this.el.offsetWidth || 84;
+    const h = this.el.offsetHeight || 24;
+    this.el.classList.remove("rp-tooltip-measure");
 
-    // Remove and re-add the visible class to restart the entrance animation
-    // even when the tooltip is already showing (e.g. anchor changed).
-    this.el.classList.remove("rp-tooltip-visible");
-    void this.el.offsetWidth; // force reflow so the browser sees the removed class
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const vh = document.documentElement.clientHeight || window.innerHeight;
+    const GAP = 5;
+    let top = anchor.bottom + GAP;
+    let above = false;
+    if (top + h > vh - 4) {
+      top = anchor.top - h - GAP; // flip above when there's no room below
+      above = true;
+    }
+    const left = Math.min(Math.max(4, anchor.left), Math.max(4, vw - w - 4));
+    this.el.style.top = `${Math.max(4, top)}px`;
+    this.el.style.left = `${left}px`;
+    this.el.classList.toggle("rp-tooltip-above", above);
+
+    if (!wasVisible) {
+      // Restart the entrance animation only when appearing, not when moving between links.
+      this.el.classList.remove("rp-tooltip-visible");
+      void this.el.offsetWidth;
+    }
     this.el.classList.add("rp-tooltip-visible");
   }
 
-  scheduleHide(): void {
+  scheduleHide(delay = 450): void {
+    if (this.hovered) return;
     this.cancelHide();
-    this.hideTimer = window.setTimeout(() => this.hide(), 700);
+    this.hideTimer = window.setTimeout(() => this.hide(), delay);
   }
 
   cancelHide(): void {
@@ -59,10 +96,15 @@ export class PreviewTooltip {
 
   hide(immediate = false): void {
     if (immediate) this.cancelHide();
+    this.hovered = false;
     this.el.classList.remove("rp-tooltip-visible");
   }
 
   isVisible(): boolean {
     return this.el.classList.contains("rp-tooltip-visible");
+  }
+
+  isHovered(): boolean {
+    return this.hovered;
   }
 }

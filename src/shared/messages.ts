@@ -1,11 +1,13 @@
-// Message contracts between the content script and the background worker.
+// Message contracts between content scripts / extension pages and the background worker.
 import type { LookupResult, ParsedReference, FetchedPdf } from "./types";
 
 export type Message =
   | LookupRequest
   | FetchPdfRequest
-  | StoreLocalPdfRequest
-  | GetLocalPdfRequest;
+  | ActivateRequest
+  | NativePdfRequest
+  | OpenNativeRequest
+  | OpenInGlimpseRequest;
 
 export interface LookupRequest {
   type: "lookup";
@@ -14,28 +16,41 @@ export interface LookupRequest {
 
 export interface FetchPdfRequest {
   type: "fetchPdf";
+  /** Candidate URLs, tried in order until one yields a real PDF. */
+  urls: string[];
+}
+
+/** Sent by the lightweight loader when it finds a supported viewer in its frame. */
+export interface ActivateRequest {
+  type: "activate";
+}
+
+/** Sent by the loader when its frame is the browser's built-in PDF viewer (Chrome/Edge). */
+export interface NativePdfRequest {
+  type: "nativePdf";
+}
+
+/** Sent by the Glimpse viewer: show this PDF in the browser's own viewer instead. */
+export interface OpenNativeRequest {
+  type: "openNative";
   url: string;
 }
 
-export interface StoreLocalPdfRequest {
-  type: "storeLocalPdf";
-  data: string; // base64
-  name: string;
+/** Sent by the "Open in Glimpse?" suggestion shown over the browser's PDF viewer. */
+export interface OpenInGlimpseRequest {
+  type: "openInGlimpse";
+  /** Also switch the PDF setting to "open automatically". */
+  always?: boolean;
 }
 
-export interface StoreLocalPdfResponse {
-  ok: true;
-  key: string;
+/** Sent by the popup to a tab's loader script to ask what it sees. */
+export interface ProbeRequest {
+  type: "probe";
 }
 
-export interface GetLocalPdfRequest {
-  type: "getLocalPdf";
-  key: string;
-}
-
-export interface GetLocalPdfResponse {
-  ok: true;
-  pdf: { data: string; name: string };
+export interface ProbeResponse {
+  isPdf: boolean;
+  env: string | null;
 }
 
 export interface LookupResponse {
@@ -46,6 +61,8 @@ export interface LookupResponse {
 export interface FetchPdfResponse {
   ok: true;
   pdf: FetchedPdf;
+  /** The URL that actually produced the PDF. */
+  url: string;
 }
 
 export interface ErrorResponse {
@@ -55,16 +72,36 @@ export interface ErrorResponse {
 
 export type Response<T> = T | ErrorResponse;
 
-/** Promise wrapper around chrome.runtime.sendMessage. */
+export const CONTEXT_INVALIDATED =
+  "Glimpse was updated or reloaded. Reload this page to keep using it.";
+
+/**
+ * Promise wrapper around chrome.runtime.sendMessage that never throws or hangs on
+ * messaging failures (e.g. "Extension context invalidated" after an extension update).
+ */
 export function sendMessage<TReq extends Message, TRes>(message: TReq): Promise<Response<TRes>> {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      const err = chrome.runtime.lastError;
-      if (err) {
-        resolve({ ok: false, error: err.message ?? "Unknown messaging error" });
+    try {
+      if (!chrome.runtime?.id) {
+        resolve({ ok: false, error: CONTEXT_INVALIDATED });
         return;
       }
-      resolve(response as Response<TRes>);
-    });
+      chrome.runtime.sendMessage(message, (response) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          const msg = err.message ?? "Unknown messaging error";
+          resolve({ ok: false, error: /invalidated|Receiving end/i.test(msg) ? CONTEXT_INVALIDATED : msg });
+          return;
+        }
+        if (response == null) {
+          resolve({ ok: false, error: "No response from the Glimpse background worker." });
+          return;
+        }
+        resolve(response as Response<TRes>);
+      });
+    } catch (err) {
+      const msg = String((err as Error)?.message ?? err);
+      resolve({ ok: false, error: /invalidated/i.test(msg) ? CONTEXT_INVALIDATED : msg });
+    }
   });
 }

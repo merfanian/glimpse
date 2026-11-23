@@ -11,6 +11,8 @@ const root = resolve(__dirname, "..");
 
 const args = process.argv.slice(2);
 const watch = args.includes("--watch");
+// --dev: unminified, inline source maps, [Glimpse] debug logging enabled.
+const dev = watch || args.includes("--dev");
 const targetArg = args.find((a) => a.startsWith("--target="));
 const target = targetArg ? targetArg.split("=")[1] : "chrome"; // chrome | firefox
 const outdir = resolve(root, "dist", target);
@@ -25,23 +27,38 @@ const jsx = {
 /** Common esbuild options. */
 const common = {
   bundle: true,
-  minify: !watch,
-  sourcemap: watch ? "inline" : false,
+  minify: !dev,
+  sourcemap: dev ? "inline" : false,
   target: ["chrome114", "firefox115"],
   logLevel: "info",
   define: {
-    "process.env.NODE_ENV": JSON.stringify(watch ? "development" : "production"),
+    "process.env.NODE_ENV": JSON.stringify(dev ? "development" : "production"),
     __EXT_VERSION__: JSON.stringify(pkg.version),
     __BROWSER__: JSON.stringify(target),
   },
   ...jsx,
 };
 
+const cssAsText = { loader: { ".css": "text" } };
+
 const entries = [
-  // Content script must be a classic (IIFE) script.
+  // Lightweight loader: the only declared content script. Runs in every frame, so it
+  // must stay tiny — it just detects a PDF viewer and asks for the full script.
   {
-    entryPoints: { content: resolve(root, "src/content/index.ts") },
+    entryPoints: { content: resolve(root, "src/content/loader.ts") },
     format: "iife",
+  },
+  // Full content script (pdf.js + UI), injected on demand via chrome.scripting.
+  {
+    entryPoints: { "content-main": resolve(root, "src/content/index.ts") },
+    format: "iife",
+    ...cssAsText,
+  },
+  // "Open in Glimpse?" card over Chrome's/Edge's built-in PDF viewer (injected on demand).
+  {
+    entryPoints: { suggest: resolve(root, "src/content/suggest.ts") },
+    format: "iife",
+    ...cssAsText,
   },
   // Background: built as IIFE so it works as both an MV3 service_worker (Chrome/Edge)
   // and a background script (Firefox).
@@ -58,13 +75,14 @@ const entries = [
   {
     entryPoints: { viewer: resolve(root, "src/viewer/viewer.ts") },
     format: "iife",
+    ...cssAsText,
   },
   // Toolbar popup.
   {
     entryPoints: { popup: resolve(root, "src/popup/popup.ts") },
     format: "iife",
   },
-  // Page main-world fetch bridge (runs in the host page's JS context).
+  // Page main-world bridge (runs in the host page's JS context).
   {
     entryPoints: { pagefetch: resolve(root, "src/content/pageFetch.ts") },
     format: "iife",
@@ -83,7 +101,7 @@ function buildManifest() {
       48: "icons/icon-48.png",
       128: "icons/icon-128.png",
     },
-    permissions: ["storage", "contextMenus", "tabs"],
+    permissions: ["storage", "contextMenus", "tabs", "scripting", "webRequest"],
     host_permissions: ["<all_urls>"],
     action: {
       default_title: "Glimpse — PDF Preview",
@@ -103,32 +121,30 @@ function buildManifest() {
       {
         matches: ["http://*/*", "https://*/*", "file:///*"],
         js: ["content.js"],
-        css: ["content.css"],
         run_at: "document_idle",
         all_frames: true,
       },
     ],
     web_accessible_resources: [
       {
-        resources: [
-          "panel.css",
-          "pdf.worker.js",
-          "pagefetch.js",
-          "viewer.html",
-          "viewer.js",
-          "viewer.css",
-          "tooltip.css",
-          "pdf_viewer.css",
-          "images/*",
-          "icons/*",
-        ],
+        // Only what content scripts load into web pages. The viewer is opened via the
+        // tabs API and needn't be reachable from (or fingerprintable by) web pages.
+        resources: ["panel.css", "pdf.worker.js", "pagefetch.js", "icons/*"],
         matches: ["<all_urls>"],
       },
     ],
   };
 
   if (target === "firefox") {
-    base.permissions.push("webRequest", "webRequestBlocking", "webRequestFilterResponse");
+    base.permissions.push("webRequestBlocking", "webRequestFilterResponse");
+    // Firefox only allows webRequest redirects to extension pages that are web-accessible
+    // (the per-install random UUID keeps this from being a fingerprint).
+    base.web_accessible_resources[0].resources.push("viewer.html");
+    // Firefox draws nothing over its own PDF viewer, so PDF tabs get an address-bar button.
+    base.page_action = {
+      default_title: "Open this PDF in Glimpse",
+      default_icon: { 16: "icons/icon-16.png", 32: "icons/icon-32.png" },
+    };
     // Explicit file:// host permission — required for background fetch of local PDFs.
     // This also makes the "Allow access to local files" toggle appear in about:addons.
     base.host_permissions.push("file:///*");
@@ -171,7 +187,6 @@ function copyStatic() {
   // Bundled viewer page + its styles.
   copyFileSync(resolve(root, "src/viewer/viewer.html"), resolve(outdir, "viewer.html"));
   copyFileSync(resolve(root, "src/viewer/viewer.css"), resolve(outdir, "viewer.css"));
-  copyFileSync(resolve(root, "src/content/tooltip.css"), resolve(outdir, "tooltip.css"));
 
   // pdf.js viewer component stylesheet + its image assets.
   const pdfViewerCss = resolve(root, "node_modules/pdfjs-dist/web/pdf_viewer.css");
@@ -181,7 +196,7 @@ function copyStatic() {
     cpSync(imagesSrc, resolve(outdir, "images"), { recursive: true });
   }
 
-  // Panel CSS (web-accessible so the content script can inject it into the page/shadow root)
+  // Panel CSS (web-accessible: Firefox content scripts <link> it into the shadow root)
   const panelCss = resolve(root, "src/content/panel/panel.css");
   if (existsSync(panelCss)) copyFileSync(panelCss, resolve(outdir, "panel.css"));
 
@@ -189,7 +204,7 @@ function copyStatic() {
   copyFileSync(resolve(root, "src/popup/popup.html"), resolve(outdir, "popup.html"));
   copyFileSync(resolve(root, "src/popup/popup.css"), resolve(outdir, "popup.css"));
 
-  // Icons (rendered from glimpse.png by scripts/generate-icons.mjs)
+  // Icons (rendered from glimpse.svg / glimpse-small.svg by scripts/generate-icons.mjs)
   const iconsDir = resolve(root, "assets/icons");
   if (existsSync(iconsDir)) {
     mkdirSync(resolve(outdir, "icons"), { recursive: true });

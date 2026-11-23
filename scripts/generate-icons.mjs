@@ -1,16 +1,16 @@
-// Generates the manifest icons from the source artwork assets/icons/glimpse.png.
-// Trims the surrounding whitespace and renders centred square PNGs at each size
-// using ImageMagick (`magick`/`convert`). When ImageMagick is unavailable (e.g.
-// a bare CI runner) the committed PNGs are reused so the build never fails.
+// Generates the manifest icons from the vector artwork:
+//   assets/icons/glimpse.svg        → 48 and 128 px
+//   assets/icons/glimpse-small.svg  → 16 and 32 px (simplified for legibility)
+// Rendered with ImageMagick (`magick`/`convert`, librsvg delegate). When ImageMagick is
+// unavailable (e.g. a bare CI runner) the committed PNGs are reused so builds never fail.
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const src = resolve(root, "assets/icons/glimpse.png");
-const outDir = resolve(root, "assets/icons");
-const sizes = [16, 32, 48, 128];
+const dir = resolve(root, "assets/icons");
+const sources = { 16: "glimpse-small.svg", 32: "glimpse-small.svg", 48: "glimpse.svg", 128: "glimpse.svg" };
 
 function magickCmd() {
   for (const cmd of ["magick", "convert"]) {
@@ -27,26 +27,29 @@ function magickCmd() {
 const cmd = magickCmd();
 let rendered = 0;
 
-for (const size of sizes) {
-  const out = resolve(outDir, `icon-${size}.png`);
+for (const [size, file] of Object.entries(sources)) {
+  const src = resolve(dir, file);
+  const out = resolve(dir, `icon-${size}.png`);
   if (cmd && existsSync(src)) {
-    execFileSync(cmd, [
-      src,
-      "-fuzz", "12%", "-transparent", "white",
-      "-trim", "+repage",
-      "-resize", `${size}x${size}`,
-      "-background", "none", "-gravity", "center", "-extent", `${size}x${size}`,
-      "-strip", out,
-    ]);
-    rendered++;
-  } else if (!existsSync(out)) {
-    console.error(`[icons] ImageMagick not found and missing ${out}. Install imagemagick.`);
+    try {
+      execFileSync(cmd, [
+        "-background", "none", "-density", "600", src,
+        "-resize", `${size}x${size}`, "-depth", "8", "-strip", out,
+      ]);
+      rendered++;
+      continue;
+    } catch (err) {
+      console.warn(`[icons] couldn't render ${file}: ${err.message}`);
+    }
+  }
+  if (!existsSync(out)) {
+    console.error(`[icons] cannot render and missing ${out}. Install ImageMagick with SVG support.`);
     process.exit(1);
   }
 }
 
 console.log(
-  rendered === sizes.length
-    ? `[icons] rendered ${sizes.join(", ")}px icons from glimpse.png`
-    : "[icons] ImageMagick not found; using committed PNG icons"
+  rendered === Object.keys(sources).length
+    ? "[icons] rendered 16, 32, 48, 128px icons from glimpse.svg / glimpse-small.svg"
+    : "[icons] ImageMagick unavailable; using committed PNG icons",
 );

@@ -8,3 +8,9 @@ declare function cloneInto<T>(obj: T, targetScope: object): T;
 declare module "pdfjs-dist/build/pdf.worker.mjs" {
   export const WorkerMessageHandler: unknown;
 }
+
+// esbuild loads .css imported from content/viewer bundles as text (see scripts/build.mjs).
+declare module "*.css" {
+  const css: string;
+  export default css;
+}

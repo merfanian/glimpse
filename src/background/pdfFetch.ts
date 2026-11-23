@@ -1,9 +1,9 @@
-// Fetches a remote PDF and returns its bytes as base64 so they can be passed back to
-// the content script (which turns them into a blob URL for display).
+// Fetches a PDF and returns its bytes as base64 so they can be passed back to the
+// requesting content script / extension page.
 import type { FetchedPdf } from "@shared/types";
 import { warn } from "@shared/debug";
 
-function arrayBufferToBase64(buf: ArrayBuffer): string {
+export function arrayBufferToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
   let binary = "";
   const chunk = 0x8000;
@@ -13,64 +13,90 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
   return btoa(binary);
 }
 
-const MAX_BYTES = 50 * 1024 * 1024; // 50 MB safety cap
+const MAX_BYTES = 60 * 1024 * 1024; // safety cap
+const FETCH_TIMEOUT_MS = 45_000;
 
-/** Read a local file:// URL via fetch (requires the extension to have file:// host permission). */
-async function fetchLocalPdf(url: string): Promise<FetchedPdf> {
-  let buf: ArrayBuffer;
-  try {
-    // fetch() works for file:// URLs in extension background scripts when
-    // "file:///*" is listed in host_permissions and the user has enabled
-    // "Allow access to local files" in about:addons (Firefox) or
-    // "Allow access to file URLs" in chrome://extensions (Chrome).
-    const res = await fetch(url);
-    buf = await res.arrayBuffer();
-  } catch {
-    // Fall back to XHR — file:// responses have status 0 on success.
-    buf = await new Promise<ArrayBuffer>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("GET", url, true);
-      xhr.responseType = "arraybuffer";
-      xhr.onload = () => {
-        if (xhr.status === 0 || xhr.status === 200) resolve(xhr.response as ArrayBuffer);
-        else reject(new Error(`HTTP ${xhr.status}`));
-      };
-      xhr.onerror = () => reject(new Error("XHR failed"));
-      xhr.send();
-    });
+/** The PDF spec allows junk before the header; readers accept "%PDF-" within the first 1 KB. */
+export function looksLikePdf(buf: ArrayBuffer): boolean {
+  const head = new Uint8Array(buf.slice(0, 1024));
+  for (let i = 0; i + 4 < head.length; i++) {
+    if (head[i] === 0x25 && head[i + 1] === 0x50 && head[i + 2] === 0x44 && head[i + 3] === 0x46 && head[i + 4] === 0x2d) {
+      return true;
+    }
   }
-  const magic = new Uint8Array(buf.slice(0, 5)).reduce((s, b) => s + String.fromCharCode(b), "");
-  if (magic !== "%PDF-") throw new Error("Resource is not a PDF");
-  if (buf.byteLength > MAX_BYTES) throw new Error("PDF too large to preview");
+  return false;
+}
+
+function toFetched(buf: ArrayBuffer): FetchedPdf {
+  if (buf.byteLength > MAX_BYTES) throw new Error("PDF is too large to preview");
+  if (!looksLikePdf(buf)) throw new Error("The link did not return a PDF (probably a landing or login page)");
   return { dataBase64: arrayBufferToBase64(buf), contentType: "application/pdf", byteLength: buf.byteLength };
 }
 
+/**
+ * Read a local file:// URL. Chrome's service worker cannot fetch file:// at all, so this
+ * only succeeds where the platform allows it (Firefox background page with file access).
+ * Callers fall back to a file picker.
+ */
+async function fetchLocalPdf(url: string): Promise<FetchedPdf> {
+  if (typeof XMLHttpRequest === "undefined") {
+    throw new Error("Local files can't be read from the background worker");
+  }
+  const buf = await new Promise<ArrayBuffer>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", url, true);
+    xhr.responseType = "arraybuffer";
+    xhr.timeout = FETCH_TIMEOUT_MS;
+    xhr.onload = () => {
+      if (xhr.status === 0 || xhr.status === 200) resolve(xhr.response as ArrayBuffer);
+      else reject(new Error(`HTTP ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("Could not read the local file"));
+    xhr.ontimeout = () => reject(new Error("Timed out reading the local file"));
+    xhr.send();
+  });
+  return toFetched(buf);
+}
+
 export async function fetchPdf(url: string): Promise<FetchedPdf> {
-  if (url.startsWith("file://")) return fetchLocalPdf(url);
+  if (url.startsWith("file:")) return fetchLocalPdf(url);
   let res: Response;
   try {
-    res = await fetch(url, { redirect: "follow", credentials: "include" });
+    res = await fetch(url, {
+      redirect: "follow",
+      credentials: "include",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
   } catch (err) {
-    throw new Error(`PDF fetch network error: ${(err as Error).message ?? String(err)}`);
+    const e = err as Error;
+    if (e?.name === "TimeoutError" || e?.name === "AbortError") throw new Error("Timed out downloading the PDF");
+    throw new Error(`Network error: ${e?.message ?? String(err)}`);
   }
-  if (!res.ok) throw new Error(`PDF fetch failed (HTTP ${res.status}) for ${res.url || url}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(res.url || url).hostname}`);
 
-  const contentType = res.headers.get("content-type") ?? "";
+  const len = Number(res.headers.get("content-length"));
+  if (Number.isFinite(len) && len > MAX_BYTES) throw new Error("PDF is too large to preview");
+
   const buf = await res.arrayBuffer();
-
-  // Basic sanity check: many "pdf" links redirect to HTML landing pages.
-  const looksPdf =
-    contentType.includes("application/pdf") ||
-    new Uint8Array(buf.slice(0, 5)).reduce((s, b) => s + String.fromCharCode(b), "") === "%PDF-";
-  if (!looksPdf) {
-    warn("response did not look like a PDF:", res.url, contentType, buf.byteLength, "bytes");
-    throw new Error("Resource is not a PDF");
+  try {
+    return toFetched(buf);
+  } catch (err) {
+    warn("response did not look like a PDF:", res.url, res.headers.get("content-type"), buf.byteLength, "bytes");
+    throw err;
   }
-  if (buf.byteLength > MAX_BYTES) throw new Error("PDF too large to preview");
+}
 
-  return {
-    dataBase64: arrayBufferToBase64(buf),
-    contentType: "application/pdf",
-    byteLength: buf.byteLength,
-  };
+/** Try each URL in order; return the first that yields a real PDF. */
+export async function fetchFirstPdf(urls: string[]): Promise<{ pdf: FetchedPdf; url: string }> {
+  const errors: string[] = [];
+  for (const url of urls) {
+    try {
+      return { pdf: await fetchPdf(url), url };
+    } catch (err) {
+      errors.push(String((err as Error)?.message ?? err));
+    }
+  }
+  if (errors.length === 0) throw new Error("No PDF link available");
+  // Most useful message first: the primary URL's failure.
+  throw new Error(errors.length === 1 ? errors[0] : `${errors[0]} (and ${errors.length - 1} other source${errors.length > 2 ? "s" : ""} failed)`);
 }

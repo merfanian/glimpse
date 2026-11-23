@@ -1,18 +1,19 @@
 {
   "name": "glimpse",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "description": "Hover a citation in a PDF and preview the cited paper (PDF or abstract) in a floating in-tab panel.",
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "build": "node scripts/generate-icons.mjs && node scripts/build.mjs",
-    "build:chrome": "node scripts/generate-icons.mjs && node scripts/build.mjs --target=chrome",
-    "build:firefox": "node scripts/generate-icons.mjs && node scripts/build.mjs --target=firefox",
-    "watch": "node scripts/generate-icons.mjs && node scripts/build.mjs --watch --target=chrome",
+    "build": "node scripts/build.mjs",
+    "build:chrome": "node scripts/build.mjs --target=chrome",
+    "build:firefox": "node scripts/build.mjs --target=firefox",
+    "watch": "node scripts/build.mjs --watch --target=chrome",
     "typecheck": "tsc --noEmit",
     "package": "npm run build:chrome && npm run build:firefox && node scripts/package.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "pdfjs-dist": "^4.6.82",

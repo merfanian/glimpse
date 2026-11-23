@@ -1,35 +1,19 @@
-// Content script entry point: wires citation detection into supported in-page viewers.
-import { detectEnvironment, type Environment } from "./citationDetector";
+// Full content script (content-main.js). Not listed in the manifest: the lightweight
+// loader (loader.ts) asks the background to inject it only into frames that contain a
+// supported PDF viewer.
+import { detectEnvironment, glimpseGlobal } from "./env";
 import { startDetection } from "./start";
-import { getSettings } from "@shared/settings";
-import { log, warn } from "@shared/debug";
-import "./tooltip.css";
+import { log } from "@shared/debug";
 
-async function bootstrap(): Promise<void> {
-  const env: Environment = detectEnvironment();
-  log("bootstrap on", location.href, "-> environment:", env);
+const state = glimpseGlobal();
 
-  if (!env) {
-    if (/\.pdf($|[?#])/i.test(location.href) || document.contentType === "application/pdf") {
-      warn(
-        "This looks like the browser's built-in PDF viewer, which extensions cannot access. " +
-          "Use the Glimpse toolbar button to reopen this PDF in the bundled viewer.",
-      );
-    }
-    return;
+if (!state.started) {
+  state.started = true;
+  const env = state.env ?? detectEnvironment() ?? "pdfjs";
+  log("starting on", location.href, "-> environment:", env);
+  const detector = startDetection(env);
+  if (state.pendingTarget) {
+    detector.primeHover(state.pendingTarget);
+    state.pendingTarget = null;
   }
-
-  const settings = await getSettings();
-  if (env === "overleaf" && !settings.enableOverleaf) {
-    log("disabled on Overleaf via settings");
-    return;
-  }
-  if (env === "pdfjs" && !settings.enablePdfViewers) {
-    log("disabled on pdf.js viewers via settings");
-    return;
-  }
-
-  startDetection(env);
 }
-
-void bootstrap();

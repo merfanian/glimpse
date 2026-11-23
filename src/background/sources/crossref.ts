@@ -1,5 +1,6 @@
 // Crossref client: DOI lookup and bibliographic query.
 import type { PaperCandidate, ParsedReference } from "@shared/types";
+import { apiFetch } from "./http";
 
 const BASE = "https://api.crossref.org/works";
 
@@ -58,12 +59,9 @@ function toCandidate(item: CrossrefItem): PaperCandidate | null {
   };
 }
 
-const TIMEOUT_MS = 10_000;
 
 export async function crossrefByDoi(doi: string, email: string): Promise<PaperCandidate | null> {
-  const res = await fetch(`${BASE}/${encodeURIComponent(doi)}?1=1${mailtoParam(email)}`, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const res = await apiFetch(`${BASE}/${encodeURIComponent(doi)}?1=1${mailtoParam(email)}`);
   if (!res.ok) return null;
   const json = (await res.json()) as { message?: CrossrefItem };
   return json.message ? toCandidate(json.message) : null;
@@ -80,9 +78,7 @@ export async function crossrefSearch(
   });
   if (ref.authors?.length) params.set("query.author", ref.authors.join(" "));
 
-  const res = await fetch(`${BASE}?${params.toString()}${mailtoParam(email)}`, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const res = await apiFetch(`${BASE}?${params.toString()}${mailtoParam(email)}`);
   if (!res.ok) return [];
   const json = (await res.json()) as { message?: { items?: CrossrefItem[] } };
   return (json.message?.items ?? [])

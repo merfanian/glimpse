@@ -234,3 +234,67 @@ describe("isBibliographyEntry", () => {
     expect(isBibliographyEntry("cite.akbik2018contextual", ref)).toBe(true);
   });
 });
+
+describe("year suffixes and cite.* destinations (ACL / natbib styles)", () => {
+  it("parses disambiguated years like 2018a", () => {
+    const ref = parseReference(
+      "Matthew Peters, Mark Neumann, and Luke Zettlemoyer. 2018a. Deep contextualized word representations. In NAACL.",
+    );
+    expect(ref.year).toBe(2018);
+    expect(isBibliographyEntry("cite.peters2018", ref)).toBe(true);
+  });
+
+  it("accepts a truncated entry behind a hyperref cite.* destination", () => {
+    const ref = parseReference(
+      "Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared Kaplan, Prafulla Dhariwal, Amanda",
+    );
+    expect(ref.year).toBeUndefined();
+    expect(isBibliographyEntry("cite.brown2020gpt3", ref)).toBe(true);
+    // The same text behind an opaque destination is still rejected.
+    expect(isBibliographyEntry('[{"num":12,"gen":0},{"name":"XYZ"}]', ref)).toBe(false);
+  });
+});
+
+describe("ACM 'Title, In Venue.' style", () => {
+  it("drops a venue glued onto the title", () => {
+    const ref = parseReference(
+      "[18] Anne Driemel and Francesco Silvestri. 2017. Locality-Sensitive Hashing of Curves, In International Symposium on Computational Geometry. International Symposium on Computational Geometry, 37:1–37:16.",
+    );
+    expect(ref.title).toBe("Locality-Sensitive Hashing of Curves");
+  });
+
+  it("doesn't take a trailing page range for the title", () => {
+    const ref = parseReference(
+      "[29] Piotr Indyk. 2001. On Approximate Nearest Neighbors under Norm. J. Comput. System Sci. 63, 4 (2001), 627–638. doi:10.1006/jcss.2001.1781",
+    );
+    expect(ref.title).toBe("On Approximate Nearest Neighbors under Norm");
+  });
+
+  it("still reads APA-style '(Year). Title.'", () => {
+    const ref = parseReference("Smith, J., & Doe, A. (2020). A study of things in context. Journal of Stuff, 3(2), 1–10.");
+    expect(ref.title).toBe("A study of things in context");
+  });
+});
+
+describe("plainnat / NeurIPS style (initials first, year last, then URL)", () => {
+  it("doesn't take the URL or publisher after the year as the title", () => {
+    expect(parseReference("C. Donahue, M. Lee, and P. Liang. Enabling language models to fill in the blanks. CoRR , abs/2005.05339, 2020. URL https://arxiv.org/abs/2005.05339").title)
+      .toBe("Enabling language models to fill in the blanks");
+    expect(parseReference("D. Dua, Y. Wang, and M. Gardner. DROP: A reading comprehension benchmark requiring discrete reasoning over paragraphs. In Proceedings of NAACL , 2019. Association for Computational Linguistics.").title)
+      .toBe("DROP: A reading comprehension benchmark requiring discrete reasoning over paragraphs");
+  });
+
+  it("doesn't split author lists at (lowercase) initials", () => {
+    expect(parseReference("Z. Yang, Z. Dai, R. Salakhutdinov, and Q. V. Le. XLNet: Generalized Autoregressive Pretraining for Language Understanding . Curran Associates Inc., 2019").title)
+      .toBe("XLNet: Generalized Autoregressive Pretraining for Language Understanding");
+    expect(parseReference("E. Choi, H. He, W.-t. Yih, and L. Zettlemoyer. QuAC: Question answering in context. In EMNLP , 2018").title)
+      .toBe("QuAC: Question answering in context");
+  });
+
+  it("accepts short titles and titles ending in a question mark", () => {
+    expect(parseReference("W. Zhu, Z. Hu, and E. P. Xing. Text infilling. CoRR , abs/1901.00158, 2019. URL http://arxiv.org/abs/1901.00158").title)
+      .toBe("Text infilling");
+    expect(parseReference("R. Zellers, A. Holtzman, and Y. Choi. HellaSwag: Can a machine really finish your sentence? In Proceedings of the 57th Annual Meeting of the ACL , 2019").title)
+      .toBe("HellaSwag: Can a machine really finish your sentence?");
+  });
+});

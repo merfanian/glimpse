@@ -187,3 +187,45 @@ describe("rank", () => {
     expect(candidates[0].doi).toBe("10.1234/x");
   });
 });
+
+describe("robust ranking (bad title parse, merged sources)", () => {
+  it("scores a correct candidate highly even when the parsed title is garbage", () => {
+    const ref: ParsedReference = {
+      raw: "Dzmitry Bahdanau, Kyunghyun Cho, and Yoshua Bengio. 2014. Neural machine translation by jointly learning to align and translate. CoRR.",
+      title: "CoRR", // simulated mis-parse
+      authors: ["Bahdanau", "Cho"],
+      year: 2014,
+    };
+    const good = scoreCandidate(ref, makeCandidate({ title: "Neural Machine Translation by Jointly Learning to Align and Translate", authors: ["Dzmitry Bahdanau", "Kyunghyun Cho"], year: 2014 }));
+    const bad = scoreCandidate(ref, makeCandidate({ title: "Effective Approaches to Attention-based Neural Machine Translation", authors: ["Minh-Thang Luong"], year: 2015 }));
+    expect(good.confidence).toBeGreaterThan(0.85);
+    expect(bad.confidence).toBeLessThan(0.5);
+  });
+
+  it("treats an arXiv-issued DOI as an arXiv id match", () => {
+    const ref: ParsedReference = { raw: "x", arxivId: "1706.03762" };
+    const r = scoreCandidate(ref, makeCandidate({ doi: "10.48550/arXiv.1706.03762" }));
+    expect(r.confidence).toBe(0.98);
+    expect(r.pdfUrl).toBe("https://arxiv.org/pdf/1706.03762");
+  });
+
+  it("merges records bridged by different identifiers into one paper", () => {
+    const a = makeCandidate({ source: "crossref", doi: "10.1/x", title: "Paper A", confidence: 0.9, abstract: "short" });
+    const b = makeCandidate({ source: "semanticscholar", doi: "10.1/x", arxivId: "1234.5678", title: "Paper A", confidence: 0.8 });
+    const c = makeCandidate({ source: "arxiv", arxivId: "1234.5678", title: "Paper A (preprint)", confidence: 0.7, abstract: "a much longer abstract" });
+    const out = dedupe([a, b, c]);
+    expect(out).toHaveLength(1);
+    expect(out[0].source).toBe("crossref");
+    expect(out[0].arxivId).toBe("1234.5678");
+    expect(out[0].abstract).toBe("a much longer abstract");
+    expect(out[0].pdfUrls).toContain("https://arxiv.org/pdf/1234.5678");
+  });
+
+  it("orders PDF links: arXiv first, publisher text-mining APIs last", () => {
+    const a = makeCandidate({ doi: "10.1/y", title: "T", confidence: 0.9, pdfUrl: "https://api.elsevier.com/content/article/x" });
+    const b = makeCandidate({ doi: "10.1/y", title: "T", confidence: 0.5, pdfUrl: "https://example.org/oa.pdf", arxivId: "2101.00001" });
+    const [m] = dedupe([a, b]);
+    expect(m.pdfUrls?.[0]).toBe("https://arxiv.org/pdf/2101.00001");
+    expect(m.pdfUrls?.[m.pdfUrls.length - 1]).toBe("https://api.elsevier.com/content/article/x");
+  });
+});
