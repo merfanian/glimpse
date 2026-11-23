@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="#install"><img alt="Chrome Web Store" src="https://img.shields.io/badge/Chrome_Web_Store-in_review-4F46E5?logo=googlechrome&logoColor=white"></a>
-  <a href="#install"><img alt="Firefox Add-ons" src="https://img.shields.io/badge/Firefox_Add--ons-in_review-4F46E5?logo=firefoxbrowser&logoColor=white"></a>
+  <a href="https://addons.mozilla.org/en-US/firefox/addon/glimpse-citation-preview-tool/"><img alt="Firefox Add-ons" src="https://img.shields.io/amo/v/glimpse-citation-preview-tool?label=Firefox%20Add-ons&logo=firefoxbrowser&logoColor=white&color=FF7139"></a>
   <a href="#install"><img alt="Microsoft Edge Add-ons" src="https://img.shields.io/badge/Edge_Add--ons-in_review-4F46E5?logo=microsoftedge&logoColor=white"></a>
   <br>
   <a href="https://github.com/merfanian/glimpse/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/merfanian/glimpse/actions/workflows/ci.yml/badge.svg"></a>
@@ -95,11 +95,11 @@ in a floating panel.
 | Browser | Install |
 | --- | --- |
 | <img src="https://img.shields.io/badge/-Chrome-4285F4?logo=googlechrome&logoColor=white" alt=""> | Chrome Web Store — *in review, link coming soon* |
-| <img src="https://img.shields.io/badge/-Firefox-FF7139?logo=firefoxbrowser&logoColor=white" alt=""> | Firefox Add-ons — *in review, link coming soon* |
+| <img src="https://img.shields.io/badge/-Firefox-FF7139?logo=firefoxbrowser&logoColor=white" alt=""> | **[Get Glimpse for Firefox](https://addons.mozilla.org/en-US/firefox/addon/glimpse-citation-preview-tool/)** |
 | <img src="https://img.shields.io/badge/-Edge-0078D7?logo=microsoftedge&logoColor=white" alt=""> | Edge Add-ons — *in review, link coming soon* |
 
-Until the store listings are live, download `glimpse-chrome.zip`, `glimpse-edge.zip` or
-`glimpse-firefox.zip` from the [latest release](https://github.com/merfanian/glimpse/releases)
+Until the Chrome and Edge listings are live, download `glimpse-chrome.zip` or
+`glimpse-edge.zip` from the [latest release](https://github.com/merfanian/glimpse/releases)
 and [load it unpacked](#load-unpacked), or [build it from source](#development).
 
 ## Using Glimpse
