@@ -4,7 +4,8 @@ import type { ParsedReference } from "./types";
 const DOI_RE = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i;
 const ARXIV_RE = /arxiv[:\s]*((?:\d{4}\.\d{4,5})(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})/i;
 const ARXIV_BARE_RE = /\b(\d{4}\.\d{4,5})(v\d+)?\b/;
-const YEAR_RE = /\b(19|20)\d{2}\b/;
+// Allows natbib/ACL disambiguation suffixes ("2018a", "2022b"), which defeat a plain \b.
+const YEAR_RE = /\b((?:19|20)\d{2})(?:[a-z])?\b/;
 
 /** Trim trailing punctuation/whitespace from a fragment. */
 function clean(s: string): string {
@@ -26,7 +27,16 @@ function looksLikeVenueFragment(s: string): boolean {
     /^in\s+(proc(?:eedings)?|the\s+\d|advances|annual)/i.test(s) ||
     /^(proceedings|advances\s+in|journal\s+of|transactions\s+on|workshop\s+on|arxiv\s+preprint)/i.test(s) ||
     /^(pages?|pp\.)\s+\d/i.test(s) ||
-    /^vol(?:ume)?[\s.]*\d/i.test(s)
+    /^vol(?:ume)?[\s.]*\d/i.test(s) ||
+    // Trailing matter of plainnat / NeurIPS-style entries ("…, 2019. URL https://…").
+    /^(url|https?:|doi\b|isbn|issn|arxiv:|available\s+(at|from)|accessed|retrieved|corr\b)/i.test(s) ||
+    /\babs\/\d/.test(s) ||
+    /:\/\//.test(s) ||
+    /^in\s+(?:[\p{Lu}\d]|the\s)/u.test(s) || // "In ICLR", "In The …"
+    /\beditors?\b/i.test(s) ||
+    /^(association\s+for|curran\s+associates|springer|openreview|pmlr|acm\s+press|ieee\s+press|mit\s+press|morgan\s+kaufmann|aaai\s+press|cambridge\s+university|oxford\s+university|elsevier|white\s+paper)/i.test(s) ||
+    // An author-list fragment such as "Salakhutdinov, and Q".
+    /^[\p{Lu}][\p{L}'’-]+,\s+and\s+\p{Lu}/u.test(s)
   );
 }
 
@@ -40,8 +50,9 @@ function guessTitle(raw: string): string | undefined {
   if (quoted) return clean(quoted[1]);
 
   // 2. Authors (Year). Title.  — APA / year-in-parens style.
-  const afterYear = raw.match(/\((?:19|20)\d{2}[a-z]?\)\.?\s*([^.]{8,}?)\.\s/);
-  if (afterYear) return clean(afterYear[1]);
+  //    Not "(2001), 627–638." — the journal-volume pattern at the end of ACM/IEEE entries.
+  const afterYear = raw.match(/\((?:19|20)\d{2}[a-z]?\)\.?\s+(?![,;:])([^.]{8,}?)\.\s/);
+  if (afterYear && /\p{L}{3}/u.test(afterYear[1])) return clean(afterYear[1]);
 
   // 3. Authors. YYYY[a]. Title.  — ACL/EMNLP bare-year style (no parens around year).
   //    Matches "2018. Contextual string embeddings..." but NOT "2018." at end of string.
@@ -56,19 +67,26 @@ function guessTitle(raw: string): string | undefined {
   //    first subsequent segment that looks like a title (long enough, has lowercase, not
   //    a venue fragment). Strip a trailing ", YYYY" that may be part of the segment for
   //    free-form styles like "Title, 2024".
+  // Don't split after an initial ("Q. V. Le", "D. d. L. Casas", "W.-t. Yih"): initials
+  // aren't sentence ends.
   const segments = raw
-    .split(/(?<=\.)\s+/)
+    .split(/(?<=\.)(?<!(?:^|[\s.(\-])\p{L}\.)\s+/u)
     .map(clean)
     .filter(Boolean);
-  for (let i = 1; i < segments.length; i++) {
-    const stripped = clean(segments[i].replace(/,\s*(?:19|20)\d{2}[a-z]?\s*\.?\s*$/, ""));
-    if (
-      stripped.length >= 20 &&
-      /[a-z]/.test(stripped) &&
-      !/^\d/.test(stripped) &&
-      !looksLikeVenueFragment(stripped)
-    ) {
-      return stripped;
+  // First look for a substantial segment; then accept a short one ("Text infilling")
+  // as long as it has at least two words and isn't venue / trailing matter.
+  for (const minLen of [20, 8]) {
+    for (let i = 1; i < segments.length; i++) {
+      const stripped = clean(segments[i].replace(/,\s*(?:19|20)\d{2}[a-z]?\s*\.?\s*$/, ""));
+      if (
+        stripped.length >= minLen &&
+        (minLen >= 20 || /\S\s+\S/.test(stripped)) &&
+        /[a-z]/.test(stripped) &&
+        !/^\d/.test(stripped) &&
+        !looksLikeVenueFragment(stripped)
+      ) {
+        return stripped;
+      }
     }
   }
 
@@ -94,6 +112,20 @@ function guessAuthors(raw: string): string[] | undefined {
   return uniq.length ? uniq : undefined;
 }
 
+/**
+ * Drop a venue glued onto the title by styles that write "Title, In Venue." (ACM's
+ * bibstrip / some biblatex setups): "Locality-Sensitive Hashing of Curves, In
+ * International Symposium on Computational Geometry" → "Locality-Sensitive Hashing of Curves".
+ */
+function stripVenueTail(title: string): string {
+  const cut = title
+    .replace(/,\s+In\s+(?=[\p{Lu}\d]|the\s|proc)[\s\S]*$/u, "")
+    // "HellaSwag: Can a machine really finish your sentence? In Proceedings of …"
+    .replace(/(?<=[?!])\s+In\s+(?=[\p{Lu}\d]|the\s)[\s\S]*$/u, "")
+    .trim();
+  return cut.length >= 8 ? cut : title;
+}
+
 export function parseReference(raw: string): ParsedReference {
   const text = clean(raw);
   const ref: ParsedReference = { raw: text };
@@ -110,10 +142,10 @@ export function parseReference(raw: string): ParsedReference {
   }
 
   const yearMatch = text.match(YEAR_RE);
-  if (yearMatch) ref.year = Number(yearMatch[0]);
+  if (yearMatch) ref.year = Number(yearMatch[1]);
 
   const title = guessTitle(text);
-  if (title) ref.title = title;
+  if (title) ref.title = stripVenueTail(title);
 
   const authors = guessAuthors(text);
   if (authors) ref.authors = authors;
@@ -135,7 +167,7 @@ export function parseReference(raw: string): ParsedReference {
 export function looksLikeBibEntry(raw: string): boolean {
   if (raw.length < 40) return false;
   if (/^(figure|fig\.|table|tab\.|algorithm|alg\.|theorem|thm\.|lemma|lem\.|corollary|cor\.|proposition|prop\.|definition|def\.|remark|rem\.|proof|example|appendix|chapter|section)\s/i.test(raw)) return false;
-  return /\b(19|20)\d{2}\b/.test(raw);
+  return YEAR_RE.test(raw);
 }
 
 /** Normalize a title for fuzzy comparison. */
@@ -199,6 +231,11 @@ export function isBibliographyEntry(destKey: string, ref: ParsedReference): bool
 
   // Signal 3: definitive identifiers — accept immediately
   if (ref.doi || ref.arxivId) return true;
+
+  // hyperref names bibliography anchors "cite.<key>" (natbib, biblatex, plain \cite).
+  // That is definitive even when the extracted text is truncated (e.g. an entry that
+  // continues in the next column), as long as it reads like the start of an entry.
+  if (/^cite\./i.test(destKey) && (ref.year || (ref.authors?.length ?? 0) >= 2 || ref.title)) return true;
 
   // Numbered entry marker ([N] or (N)) — accept regardless of year because the
   // extracted text may be truncated and not include the trailing year/venue.

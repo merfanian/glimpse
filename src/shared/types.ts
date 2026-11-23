@@ -13,7 +13,7 @@ export interface ParsedReference {
 
 /** A candidate paper found by an external source. */
 export interface PaperCandidate {
-  source: "crossref" | "arxiv" | "semanticscholar";
+  source: "crossref" | "arxiv" | "semanticscholar" | "openalex";
   title: string;
   authors: string[];
   year?: number;
@@ -22,6 +22,8 @@ export interface PaperCandidate {
   abstract?: string;
   /** Direct URL to an (ideally open-access) PDF, if known. */
   pdfUrl?: string;
+  /** Every known PDF URL, best first (pdfUrl is pdfUrls[0]). Tried in order on fetch. */
+  pdfUrls?: string[];
   /** Landing/abstract page URL. */
   url?: string;
   venue?: string;

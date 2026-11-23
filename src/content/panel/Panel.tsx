@@ -1,643 +1,694 @@
 /** @jsxImportSource preact */
+import type { ComponentChildren } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import * as preact from "preact";
-import * as pdfjs from "pdfjs-dist";
-import { pdfWorkerReady } from "../pdfWorkerSetup";
-import { renderPdfPagesInMainWorld } from "../pdfReference";
-import type { RenderedPdfPages } from "../pdfReference";
 import { sendMessage } from "@shared/messages";
-import type {
-  LookupRequest,
-  LookupResponse,
-  FetchPdfRequest,
-  FetchPdfResponse,
-} from "@shared/messages";
+import type { LookupRequest, LookupResponse, FetchPdfRequest, FetchPdfResponse } from "@shared/messages";
 import type { ParsedReference, PaperCandidate, LookupResult } from "@shared/types";
+import { getSettings } from "@shared/settings";
+import { base64ToUint8Array } from "../pdfReference";
+import { openPdfBackend, PdfPagesView } from "./pdfView";
 
-interface PanelProps {
-  reference: ParsedReference;
-  onClose: () => void;
+// ─────────────────────────────────────────────────────────────────────────────
+// Geometry (position + size), remembered across panels and page loads
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface Geometry {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
-type Phase = "lookup" | "ready" | "error";
-type ViewMode = "abstract" | "pdf";
-type PdfLoadPhase = "idle" | "fetching" | "ready" | "error";
+const MIN_W = 320;
+const MIN_H = 240;
+const MARGIN = 8;
 
-function confidenceLabel(c: number): { text: string; cls: string } {
-  if (c >= 0.9) return { text: `High match (${Math.round(c * 100)}%)`, cls: "rp-conf-high" };
-  if (c >= 0.6) return { text: `Likely match (${Math.round(c * 100)}%)`, cls: "rp-conf-med" };
-  return { text: `Low confidence (${Math.round(c * 100)}%)`, cls: "rp-conf-low" };
-}
-
-export function Panel({ reference, onClose }: PanelProps) {
-  const defaultViewRef = useRef<ViewMode>("abstract");
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Lookup state
-  const [phase, setPhase] = useState<Phase>("lookup");
-  const [error, setError] = useState("");
-  const [result, setResult] = useState<LookupResult | null>(null);
-  const [selected, setSelected] = useState(-1);
-  const [showAlternatives, setShowAlternatives] = useState(false);
-
-  // View / PDF state
-  const [viewMode, setViewMode] = useState<ViewMode>("abstract");
-  const [pdfLoadPhase, setPdfLoadPhase] = useState<PdfLoadPhase>("idle");
-  const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
-  const [pdfError, setPdfError] = useState("");
-
-  // Load default view setting once.
-  useEffect(() => {
-    chrome.storage.sync.get("settings", (stored) => {
-      const dv = (stored?.settings as Record<string, unknown>)?.defaultView;
-      if (dv === "pdf") defaultViewRef.current = "pdf";
-    });
-  }, []);
-
-  // Reset and run lookup whenever reference changes.
-  useEffect(() => {
-    let cancelled = false;
-    setPhase("lookup");
-    setError("");
-    setResult(null);
-    setSelected(-1);
-    setShowAlternatives(false);
-    setViewMode("abstract");
-    setPdfBytes(null);
-    setPdfLoadPhase("idle");
-    setPdfError("");
-
-    (async () => {
-      const resp = await sendMessage<LookupRequest, LookupResponse>({
-        type: "lookup",
-        reference,
-      });
-      if (cancelled) return;
-      if (!resp.ok) {
-        setError(resp.error);
-        setPhase("error");
-        return;
-      }
-      setResult(resp.result);
-      setSelected(resp.result.bestIndex);
-      setPhase("ready");
-      if (defaultViewRef.current === "pdf") setViewMode("pdf");
-    })();
-
-    return () => { cancelled = true; };
-  }, [reference]);
-
-  // Reset PDF state when the selected candidate changes.
-  useEffect(() => {
-    setPdfBytes(null);
-    setPdfLoadPhase("idle");
-    setPdfError("");
-    if (viewMode === "pdf") setViewMode("abstract");
-  }, [selected]);
-
-  const candidate: PaperCandidate | undefined =
-    result && selected >= 0 ? result.candidates[selected] : undefined;
-
-  // Lazily fetch PDF when PDF mode is activated.
-  useEffect(() => {
-    if (viewMode !== "pdf" || phase !== "ready") return;
-    if (pdfBytes || pdfLoadPhase !== "idle") return;
-
-    if (!candidate?.pdfUrl) {
-      setPdfError("No PDF available for this paper.");
-      setPdfLoadPhase("error");
-      return;
-    }
-
-    setPdfLoadPhase("fetching");
-    console.log(
-      "[RefPrev][cs] preview PDF fetch:",
-      JSON.stringify({ source: candidate.source, url: candidate.pdfUrl, title: candidate.title }),
-    );
-    sendMessage<FetchPdfRequest, FetchPdfResponse>({
-      type: "fetchPdf",
-      url: candidate.pdfUrl,
-    }).then((resp) => {
-      if (!resp.ok) {
-        console.warn("[RefPrev][cs] preview PDF fetch failed:", resp.error);
-        setPdfError(resp.error);
-        setPdfLoadPhase("error");
-        return;
-      }
-      if (!resp.pdf.dataBase64) {
-        setPdfError("No PDF data returned.");
-        setPdfLoadPhase("error");
-        return;
-      }
-      // Decode base64 → Uint8Array for pdfjs canvas rendering.
-      const bin = atob(resp.pdf.dataBase64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      setPdfBytes(bytes);
-      setPdfLoadPhase("ready");
-    });
-  }, [viewMode, phase, candidate?.pdfUrl]);
-
-  const openInNewTab = () => {
-    const url = candidate?.url ?? candidate?.pdfUrl;
-    if (url) window.open(url, "_blank", "noopener");
+function viewport(): { vw: number; vh: number } {
+  return {
+    vw: document.documentElement.clientWidth || window.innerWidth,
+    vh: document.documentElement.clientHeight || window.innerHeight,
   };
+}
 
-  const conf = candidate ? confidenceLabel(candidate.confidence) : null;
-  const showWarning =
-    !!candidate && (candidate.confidence < 0.9 || (result?.candidates.length ?? 0) > 1);
+function defaultGeometry(): Geometry {
+  const { vw, vh } = viewport();
+  const width = Math.min(Math.max(420, Math.round(vw * 0.36)), 760);
+  const height = Math.min(Math.round(vh * 0.84), 980);
+  return { left: vw - width - 24, top: Math.max(MARGIN, Math.round(vh * 0.06)), width, height };
+}
 
-  const paperTitle =
-    candidate?.title ?? reference.title ?? reference.doi ?? reference.raw.slice(0, 80);
+/** Keep the whole panel on screen (shrinking it if the window got smaller). */
+export function clampGeometry(g: Geometry): Geometry {
+  const { vw, vh } = viewport();
+  const width = Math.max(Math.min(g.width, vw - 2 * MARGIN), Math.min(MIN_W, vw - 2 * MARGIN));
+  const height = Math.max(Math.min(g.height, vh - 2 * MARGIN), Math.min(MIN_H, vh - 2 * MARGIN));
+  const left = Math.min(Math.max(MARGIN, g.left), Math.max(MARGIN, vw - width - MARGIN));
+  const top = Math.min(Math.max(MARGIN, g.top), Math.max(MARGIN, vh - height - MARGIN));
+  return { left, top, width, height };
+}
+
+let savedGeometry: Geometry | null = null;
+const GEOMETRY_KEY = "panelGeometry";
+
+export function loadSavedGeometry(): void {
+  try {
+    chrome.storage.local.get(GEOMETRY_KEY, (v) => {
+      void chrome.runtime.lastError;
+      const g = v?.[GEOMETRY_KEY] as Geometry | undefined;
+      if (g && [g.left, g.top, g.width, g.height].every((n) => typeof n === "number" && isFinite(n))) {
+        savedGeometry ??= g;
+      }
+    });
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function persistGeometry(g: Geometry): void {
+  savedGeometry = g;
+  try {
+    void chrome.storage.local.set({ [GEOMETRY_KEY]: g });
+  } catch {
+    /* ignore */
+  }
+}
+
+function applyGeometry(el: HTMLElement, g: Geometry): void {
+  el.style.left = `${g.left}px`;
+  el.style.top = `${g.top}px`;
+  el.style.width = `${g.width}px`;
+  el.style.height = `${g.height}px`;
+}
+
+function isEditable(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  if (!el || typeof el.closest !== "function") return false;
+  return !!el.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shell: frame, dragging, resizing, Escape. Persists while its content changes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function PanelShell({ onClose, children }: { onClose: () => void; children: ComponentChildren }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const geom = useRef<Geometry>(clampGeometry(savedGeometry ?? defaultGeometry()));
+
+  useEffect(() => {
+    const panel = ref.current!;
+    applyGeometry(panel, geom.current);
+
+    type Mode = { kind: "move" } | { kind: "resize"; dir: "sw" | "se" };
+    let mode: Mode | null = null;
+    let sx = 0, sy = 0;
+    let start: Geometry = geom.current;
+
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const t = e.target as HTMLElement;
+      const grip = t.closest<HTMLElement>("[data-resize]");
+      if (grip) {
+        mode = { kind: "resize", dir: grip.dataset.resize as "sw" | "se" };
+      } else if (t.closest(".rp-header") && !t.closest("button, a, input")) {
+        mode = { kind: "move" };
+      } else {
+        return;
+      }
+      e.preventDefault();
+      sx = e.clientX;
+      sy = e.clientY;
+      start = { ...geom.current };
+      panel.setPointerCapture(e.pointerId);
+      panel.classList.add("rp-panel-busy");
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (!mode) return;
+      const dx = e.clientX - sx;
+      const dy = e.clientY - sy;
+      const { vw, vh } = viewport();
+      let g: Geometry;
+      if (mode.kind === "move") {
+        g = clampGeometry({ ...start, left: start.left + dx, top: start.top + dy });
+      } else if (mode.dir === "se") {
+        g = {
+          ...start,
+          width: Math.min(Math.max(MIN_W, start.width + dx), vw - start.left - MARGIN),
+          height: Math.min(Math.max(MIN_H, start.height + dy), vh - start.top - MARGIN),
+        };
+      } else {
+        const right = start.left + start.width;
+        const width = Math.min(Math.max(MIN_W, start.width - dx), right - MARGIN);
+        g = {
+          ...start,
+          left: right - width,
+          width,
+          height: Math.min(Math.max(MIN_H, start.height + dy), vh - start.top - MARGIN),
+        };
+      }
+      geom.current = g;
+      applyGeometry(panel, g);
+    };
+
+    const onUp = (e: PointerEvent) => {
+      if (!mode) return;
+      mode = null;
+      panel.classList.remove("rp-panel-busy");
+      try {
+        panel.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      persistGeometry(geom.current);
+    };
+
+    const onResize = () => {
+      geom.current = clampGeometry(geom.current);
+      applyGeometry(panel, geom.current);
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const insidePanel = e.composedPath().includes(panel);
+      if (!insidePanel && isEditable(e.target)) return; // e.g. typing in Overleaf's editor
+      onClose();
+    };
+
+    panel.addEventListener("pointerdown", onDown);
+    panel.addEventListener("pointermove", onMove);
+    panel.addEventListener("pointerup", onUp);
+    panel.addEventListener("pointercancel", onUp);
+    window.addEventListener("resize", onResize);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      panel.removeEventListener("pointerdown", onDown);
+      panel.removeEventListener("pointermove", onMove);
+      panel.removeEventListener("pointerup", onUp);
+      panel.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("resize", onResize);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [onClose]);
 
   return (
-    <div class="rp-panel" ref={panelRef}>
-      <PanelHeader title={paperTitle} onClose={onClose} />
+    <div class="rp-panel" ref={ref} role="dialog" aria-label="Glimpse citation preview">
+      {children}
+      <div class="rp-grip rp-grip-sw" data-resize="sw" title="Drag to resize" aria-hidden="true" />
+      <div class="rp-grip rp-grip-se" data-resize="se" title="Drag to resize" aria-hidden="true" />
+    </div>
+  );
+}
+
+const logoUrl = (() => {
+  try {
+    return chrome.runtime.getURL("icons/icon-48.png");
+  } catch {
+    return "";
+  }
+})();
+
+function Header({ title, onClose }: { title: string; onClose: () => void }) {
+  return (
+    <div class="rp-header" title="Drag to move">
+      {logoUrl && <img class="rp-header-logo" src={logoUrl} width={18} height={18} alt="" />}
+      <span class="rp-header-title" title={title}>
+        {title}
+      </span>
+      <button class="rp-close" onClick={onClose} aria-label="Close preview" title="Close (Esc)">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function Spinner({ label }: { label: string }) {
+  return (
+    <div class="rp-loading" role="status">
+      <span class="rp-spinner" aria-hidden="true" />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function scholarUrl(reference: ParsedReference, candidate?: PaperCandidate): string {
+  const q = candidate?.title ?? reference.title ?? reference.raw.slice(0, 250);
+  return `https://scholar.google.com/scholar?q=${encodeURIComponent(q)}`;
+}
+
+function ExternalIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" class="rp-ext-icon">
+      <path d="M5 2H2v8h8V7M7 2h3v3M10 2L5.5 6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Simple views
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function LoadingView({ onClose }: { onClose: () => void }) {
+  return (
+    <>
+      <Header title="Glimpse" onClose={onClose} />
+      <div class="rp-body">
+        <Spinner label="Reading this PDF's bibliography…" />
+      </div>
+    </>
+  );
+}
+
+export function ErrorView({ title, detail, onClose }: { title: string; detail: string; onClose: () => void }) {
+  return (
+    <>
+      <Header title="Glimpse" onClose={onClose} />
+      <div class="rp-body rp-scroll">
+        <div class="rp-message">
+          <p class="rp-message-title">{title}</p>
+          <p class="rp-message-detail">{detail}</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reference view: lookup → abstract / PDF
+// ─────────────────────────────────────────────────────────────────────────────
+
+type LookupState =
+  | { status: "loading" }
+  | { status: "error"; error: string }
+  | { status: "done"; result: LookupResult };
+
+type PdfState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; error: string }
+  | { status: "ready"; bytes: Uint8Array; url: string };
+
+function confidenceLabel(c: number): { text: string; cls: string } {
+  const pct = Math.round(c * 100);
+  if (c >= 0.85) return { text: `Strong match · ${pct}%`, cls: "rp-conf-high" };
+  if (c >= 0.6) return { text: `Likely match · ${pct}%`, cls: "rp-conf-med" };
+  return { text: `Uncertain match · ${pct}%`, cls: "rp-conf-low" };
+}
+
+function pdfUrlsOf(c?: PaperCandidate): string[] {
+  if (!c) return [];
+  const urls = c.pdfUrls?.length ? c.pdfUrls : c.pdfUrl ? [c.pdfUrl] : [];
+  return urls.filter(Boolean);
+}
+
+function authorLine(c: PaperCandidate): string {
+  return c.authors.slice(0, 6).join(", ") + (c.authors.length > 6 ? ", et al." : "");
+}
+
+const SOURCE_NAMES: Record<PaperCandidate["source"], string> = {
+  semanticscholar: "Semantic Scholar",
+  arxiv: "arXiv",
+  crossref: "Crossref",
+  openalex: "OpenAlex",
+};
+
+export function ReferenceView({ reference, onClose }: { reference: ParsedReference; onClose: () => void }) {
+  const [lookup, setLookup] = useState<LookupState>({ status: "loading" });
+  const [selected, setSelected] = useState(0);
+  const [view, setView] = useState<"abstract" | "pdf">("abstract");
+  const [showAlts, setShowAlts] = useState(false);
+  const [pdf, setPdf] = useState<PdfState>({ status: "idle" });
+  const [attempt, setAttempt] = useState(0);
+  const [pageInfo, setPageInfo] = useState<{ page: number; total: number } | null>(null);
+  // Finished PDF downloads per candidate (by URL list), so switching views/candidates is instant.
+  const pdfCache = useRef(new Map<string, Promise<PdfState>>());
+
+  // ── Lookup (re-runs for a new reference or on Retry) ──
+  useEffect(() => {
+    let cancelled = false;
+    setLookup({ status: "loading" });
+    setSelected(0);
+    setShowAlts(false);
+    setView("abstract");
+    setPageInfo(null);
+    void Promise.all([
+      sendMessage<LookupRequest, LookupResponse>({ type: "lookup", reference }),
+      getSettings(),
+    ]).then(([resp, settings]) => {
+      if (cancelled) return;
+      if (!resp.ok) {
+        setLookup({ status: "error", error: resp.error });
+        return;
+      }
+      const best = Math.max(0, resp.result.bestIndex);
+      setLookup({ status: "done", result: resp.result });
+      setSelected(best);
+      if (settings.defaultView === "pdf" && pdfUrlsOf(resp.result.candidates[best]).length) setView("pdf");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [reference, attempt]);
+
+  const candidates = lookup.status === "done" ? lookup.result.candidates : [];
+  const candidate: PaperCandidate | undefined = candidates[selected];
+  const urls = pdfUrlsOf(candidate);
+  const pdfKey = urls.join("\n");
+
+  // ── PDF download for the selected candidate (only while the PDF view is shown) ──
+  useEffect(() => {
+    if (view !== "pdf" || !candidate) return;
+    if (!pdfKey) {
+      setPdf({ status: "error", error: "No open-access PDF is known for this paper." });
+      return;
+    }
+    let cancelled = false;
+    let p = pdfCache.current.get(pdfKey);
+    if (!p) {
+      p = sendMessage<FetchPdfRequest, FetchPdfResponse>({ type: "fetchPdf", urls }).then(
+        (resp): PdfState => {
+          if (!resp.ok) return { status: "error", error: resp.error };
+          if (!resp.pdf.dataBase64) return { status: "error", error: "The PDF download was empty." };
+          return { status: "ready", bytes: base64ToUint8Array(resp.pdf.dataBase64), url: resp.url };
+        },
+      );
+      pdfCache.current.set(pdfKey, p);
+      // Failures aren't cached so Retry really retries.
+      void p.then((s) => s.status === "error" && pdfCache.current.delete(pdfKey));
+    }
+    setPdf({ status: "loading" });
+    void p.then((s) => {
+      if (!cancelled) setPdf(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, pdfKey, attempt]);
+
+  useEffect(() => setPageInfo(null), [view, pdfKey]);
+
+  const retry = () => setAttempt((n) => n + 1);
+
+  const headerTitle =
+    candidate?.title ?? (lookup.status === "loading" ? reference.title ?? "Looking up…" : "Glimpse");
+
+  return (
+    <>
+      <Header title={headerTitle} onClose={onClose} />
 
       <div class="rp-body">
-        {phase === "lookup" && (
-          <div class="rp-status">Searching…</div>
-        )}
-
-        {phase === "error" && (
-          <div class="rp-status rp-error">
-            <p>Couldn't find this reference.</p>
-            <p class="rp-error-detail">{error}</p>
-            <p class="rp-raw">{reference.raw}</p>
+        {lookup.status === "loading" && (
+          <div class="rp-scroll">
+            <div class="rp-skeleton" role="status" aria-label="Finding this paper">
+              <div class="rp-skel rp-skel-title" />
+              <div class="rp-skel rp-skel-title2" />
+              <div class="rp-skel rp-skel-meta" />
+              <div class="rp-skel rp-skel-line" />
+              <div class="rp-skel rp-skel-line" />
+              <div class="rp-skel rp-skel-line short" />
+            </div>
+            <ReferenceBox reference={reference} open />
           </div>
         )}
 
-        {phase === "ready" && !candidate && (
-          <div class="rp-status rp-error">
-            <p>No matching paper found.</p>
-            <p class="rp-raw">{reference.raw}</p>
+        {lookup.status === "error" && (
+          <div class="rp-scroll">
+            <div class="rp-message">
+              <p class="rp-message-title">The lookup failed</p>
+              <p class="rp-message-detail">{lookup.error}</p>
+            </div>
+            <ReferenceBox reference={reference} open />
           </div>
         )}
 
-        {phase === "ready" && candidate && (
+        {lookup.status === "done" && !candidate && (
+          <div class="rp-scroll">
+            <div class="rp-message">
+              <p class="rp-message-title">No matching paper found online</p>
+              <p class="rp-message-detail">
+                Crossref, arXiv, Semantic Scholar and OpenAlex didn't return a confident match.
+                Here is the entry from this paper's bibliography:
+              </p>
+            </div>
+            <ReferenceBox reference={reference} open />
+          </div>
+        )}
+
+        {lookup.status === "done" && candidate && (
           <>
-            {conf && (
-              <div class={`rp-banner ${showWarning ? "rp-banner-warn" : ""}`}>
-                <span class={`rp-conf ${conf.cls}`}>{conf.text}</span>
-                {(result?.candidates.length ?? 0) > 1 && (
-                  <button
-                    class="rp-link-btn"
-                    onClick={() => setShowAlternatives((v) => !v)}
-                  >
-                    {showAlternatives
-                      ? "Hide alternatives"
-                      : `Other matches (${result!.candidates.length - 1})`}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {showAlternatives && result && (
-              <ul class="rp-alts">
-                {result.candidates.map((c, i) => (
+            <ConfidenceBanner
+              candidate={candidate}
+              count={candidates.length}
+              showAlts={showAlts}
+              onToggle={() => setShowAlts((v) => !v)}
+            />
+            {showAlts && (
+              <ul class="rp-alts" role="listbox">
+                {candidates.map((c, i) => (
                   <li
                     key={`${c.source}-${i}`}
+                    role="option"
+                    aria-selected={i === selected}
                     class={i === selected ? "rp-alt rp-alt-active" : "rp-alt"}
                     onClick={() => {
                       setSelected(i);
-                      setShowAlternatives(false);
+                      setShowAlts(false);
                     }}
                   >
                     <span class="rp-alt-conf">{Math.round(c.confidence * 100)}%</span>
                     <span class="rp-alt-title">{c.title}</span>
-                    <span class="rp-alt-meta">{c.year ?? "—"} · {c.source}</span>
+                    <span class="rp-alt-meta">{c.year ?? "—"}</span>
                   </li>
                 ))}
               </ul>
             )}
 
-            {viewMode === "abstract" && (
-              <div class="rp-abstract-view">
-                <h2 class="rp-paper-title">{candidate.title}</h2>
-                <p class="rp-paper-meta">
-                  {candidate.authors.slice(0, 3).join(", ")}
-                  {candidate.authors.length > 3 ? " et al." : ""}
-                  {candidate.year ? ` · ${candidate.year}` : ""}
-                  {candidate.venue ? ` · ${candidate.venue}` : ""}
-                </p>
-                <div class="rp-abstract-body">
-                  {candidate.abstract ? (
-                    <p class="rp-abstract-text">{candidate.abstract}</p>
+            {view === "abstract" ? (
+              <div class="rp-scroll rp-abstract-view">
+                <h2 class="rp-paper-title">
+                  {candidate.url ? (
+                    <a href={candidate.url} target="_blank" rel="noopener noreferrer">
+                      {candidate.title}
+                    </a>
                   ) : (
-                    <p class="rp-muted">No abstract available.</p>
+                    candidate.title
                   )}
-                </div>
+                </h2>
+                {candidate.authors.length > 0 && <p class="rp-paper-authors">{authorLine(candidate)}</p>}
+                {(candidate.year || candidate.venue) && (
+                  <div class="rp-chips">
+                    {candidate.year && <span class="rp-chip rp-chip-year">{candidate.year}</span>}
+                    {candidate.venue && (
+                      <span class="rp-chip" title={candidate.venue}>
+                        {candidate.venue}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <p class="rp-section-label">Abstract</p>
+                {candidate.abstract ? (
+                  <p class="rp-abstract-text">{candidate.abstract}</p>
+                ) : (
+                  <p class="rp-muted">No abstract available from the metadata sources.</p>
+                )}
+                <ReferenceBox reference={reference} />
               </div>
-            )}
-
-            {viewMode === "pdf" && (
-              <div class="rp-pdf-view">
-                {pdfLoadPhase === "fetching" && (
-                  <div class="rp-pdf-loading">Fetching PDF…</div>
-                )}
-                {pdfLoadPhase === "error" && (
-                  <div class="rp-status rp-error">{pdfError}</div>
-                )}
-                {pdfLoadPhase === "ready" && pdfBytes && (
-                  <PdfCanvasRenderer bytes={pdfBytes} />
-                )}
-              </div>
+            ) : (
+              <PdfPane
+                state={pdf}
+                candidate={candidate}
+                reference={reference}
+                onRetry={retry}
+                onPage={(page, total) => setPageInfo({ page, total })}
+              />
             )}
           </>
         )}
       </div>
 
       <div class="rp-footer">
-        <ResizeGrip panelRef={panelRef} />
-        <div class="rp-footer-btns">
-          {phase === "ready" && candidate && (
-            <>
-              {viewMode === "abstract" ? (
-                candidate.pdfUrl && (
-                  <button class="rp-btn" onClick={() => setViewMode("pdf")}>
-                    Show full PDF
-                  </button>
-                )
-              ) : (
-                <button class="rp-btn rp-btn-secondary" onClick={() => setViewMode("abstract")}>
-                  ← Abstract
-                </button>
-              )}
-              <button class="rp-btn rp-btn-secondary" onClick={openInNewTab}>
-                Open in new tab
+        {lookup.status === "done" && candidate ? (
+          <>
+            <div class="rp-segmented" role="tablist" aria-label="Preview mode">
+              <button
+                role="tab"
+                aria-selected={view === "abstract"}
+                class={view === "abstract" ? "rp-seg rp-seg-on" : "rp-seg"}
+                onClick={() => setView("abstract")}
+              >
+                Abstract
               </button>
-            </>
-          )}
-          <button class="rp-btn rp-btn-secondary" onClick={onClose}>
-            Close
-          </button>
+              <button
+                role="tab"
+                aria-selected={view === "pdf"}
+                class={view === "pdf" ? "rp-seg rp-seg-on" : "rp-seg"}
+                disabled={urls.length === 0}
+                title={urls.length ? "Show the full PDF" : "No open-access PDF found"}
+                onClick={() => setView("pdf")}
+              >
+                Full PDF
+              </button>
+            </div>
+            {view === "pdf" && pageInfo && (
+              <span class="rp-page-info">
+                {pageInfo.page} / {pageInfo.total}
+              </span>
+            )}
+            <span class="rp-spacer" />
+            {candidate.url && (
+              <a class="rp-btn rp-btn-secondary" href={candidate.url} target="_blank" rel="noopener noreferrer">
+                Open <ExternalIcon />
+              </a>
+            )}
+          </>
+        ) : (
+          <>
+            <span class="rp-spacer" />
+            {lookup.status !== "loading" && (
+              <>
+                <button class="rp-btn rp-btn-secondary" onClick={retry}>
+                  Retry
+                </button>
+                <a class="rp-btn" href={scholarUrl(reference)} target="_blank" rel="noopener noreferrer">
+                  Search Google Scholar <ExternalIcon />
+                </a>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function ReferenceBox({ reference, open = false }: { reference: ParsedReference; open?: boolean }) {
+  return (
+    <details class="rp-ref" open={open}>
+      <summary>As cited in this paper</summary>
+      <p class="rp-ref-raw">{reference.raw}</p>
+    </details>
+  );
+}
+
+function ConfidenceBanner({
+  candidate,
+  count,
+  showAlts,
+  onToggle,
+}: {
+  candidate: PaperCandidate;
+  count: number;
+  showAlts: boolean;
+  onToggle: () => void;
+}) {
+  const conf = confidenceLabel(candidate.confidence);
+  return (
+    <div class="rp-banner">
+      <span class={`rp-pill ${conf.cls}`} title={candidate.matchNotes.join(", ") || undefined}>
+        {conf.text}
+      </span>
+      <span class="rp-source">via {SOURCE_NAMES[candidate.source] ?? candidate.source}</span>
+      {count > 1 && (
+        <button class="rp-link-btn" onClick={onToggle} aria-expanded={showAlts}>
+          {showAlts ? "Hide alternatives" : `${count - 1} other match${count > 2 ? "es" : ""}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PdfPane({
+  state,
+  candidate,
+  reference,
+  onRetry,
+  onPage,
+}: {
+  state: PdfState;
+  candidate: PaperCandidate;
+  reference: ParsedReference;
+  onRetry: () => void;
+  onPage: (page: number, total: number) => void;
+}) {
+  if (state.status === "error") {
+    const direct = pdfUrlsOf(candidate)[0];
+    return (
+      <div class="rp-scroll">
+        <div class="rp-message">
+          <p class="rp-message-title">Couldn't load the PDF here</p>
+          <p class="rp-message-detail">{state.error}</p>
+          <div class="rp-actions">
+            <button class="rp-btn rp-btn-secondary" onClick={onRetry}>
+              Retry
+            </button>
+            {direct && (
+              <a class="rp-btn rp-btn-secondary" href={direct} target="_blank" rel="noopener noreferrer">
+                Open PDF in new tab <ExternalIcon />
+              </a>
+            )}
+            <a class="rp-btn rp-btn-secondary" href={scholarUrl(reference, candidate)} target="_blank" rel="noopener noreferrer">
+              Google Scholar <ExternalIcon />
+            </a>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  }
+  if (state.status !== "ready") {
+    return (
+      <div class="rp-pdf-view">
+        <Spinner label="Downloading PDF…" />
+      </div>
+    );
+  }
+  return <PdfDocument bytes={state.bytes} onPage={onPage} />;
 }
 
-// ---------------------------------------------------------------------------
-// Bottom-left resize grip (CSS resize handle is always bottom-right which is
-// inaccessible when the panel is docked to the right edge of the screen).
-// ---------------------------------------------------------------------------
-
-function ResizeGrip({ panelRef }: { panelRef: preact.RefObject<HTMLDivElement> }) {
-  const gripRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const grip = gripRef.current;
-    if (!grip) return;
-
-    let startX = 0, startY = 0, startW = 0, startH = 0, startLeft = 0;
-
-    const onDown = (e: PointerEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const panel = panelRef.current;
-      if (!panel) return;
-      const rect = panel.getBoundingClientRect();
-      startX = e.clientX;
-      startY = e.clientY;
-      startW = rect.width;
-      startH = rect.height;
-      startLeft = rect.left;
-      // Anchor right edge so expanding left doesn't move the panel rightward
-      panel.style.right = "auto";
-      panel.style.left = `${startLeft}px`;
-      grip.setPointerCapture(e.pointerId);
-    };
-
-    const onMove = (e: PointerEvent) => {
-      if (!grip.hasPointerCapture(e.pointerId)) return;
-      const panel = panelRef.current;
-      if (!panel) return;
-      const dx = e.clientX - startX; // negative = grow left
-      const dy = e.clientY - startY; // positive = grow down
-      const newW = Math.max(360, startW - dx);
-      const newH = Math.max(260, startH + dy);
-      const newLeft = startLeft + (startW - newW);
-      panel.style.width = `${newW}px`;
-      panel.style.height = `${newH}px`;
-      panel.style.left = `${newLeft}px`;
-    };
-
-    const onUp = (e: PointerEvent) => {
-      try { grip.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    };
-
-    grip.addEventListener("pointerdown", onDown);
-    grip.addEventListener("pointermove", onMove);
-    grip.addEventListener("pointerup", onUp);
-    return () => {
-      grip.removeEventListener("pointerdown", onDown);
-      grip.removeEventListener("pointermove", onMove);
-      grip.removeEventListener("pointerup", onUp);
-    };
-  }, [panelRef]);
-
-  return (
-    <div class="rp-resize-grip" ref={gripRef} title="Drag to resize" aria-hidden="true">
-      {/* 6-dot triangular grip — dots cluster toward bottom-left, indicating SW drag */}
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-        <circle cx="2.5" cy="11.5" r="1.25"/>
-        <circle cx="6.5" cy="11.5" r="1.25"/>
-        <circle cx="10.5" cy="11.5" r="1.25"/>
-        <circle cx="2.5" cy="7.5"  r="1.25"/>
-        <circle cx="6.5" cy="7.5"  r="1.25"/>
-        <circle cx="2.5" cy="3.5"  r="1.25"/>
-      </svg>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Canvas-based PDF renderer for Chrome/Edge (no iframe — works inside shadow DOM)
-// ---------------------------------------------------------------------------
-
-type CanvasState =
-  | { kind: "loading" }
-  | { kind: "error"; message: string }
-  | { kind: "ready"; numPages: number };
-
-function PdfChromeRenderer({ bytes }: { bytes: Uint8Array }) {
+function PdfDocument({ bytes, onPage }: { bytes: Uint8Array; onPage: (page: number, total: number) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [canvasState, setCanvasState] = useState<CanvasState>({ kind: "loading" });
-  const docRef = useRef<pdfjs.PDFDocumentProxy | null>(null);
-  const isRenderingRef = useRef(false);
-  const rerenderQueuedRef = useRef(false);
-
-  const renderAll = useCallback(async () => {
-    const doc = docRef.current;
-    const container = containerRef.current;
-    if (!doc || !container) return;
-
-    if (isRenderingRef.current) {
-      rerenderQueuedRef.current = true;
-      return;
-    }
-    isRenderingRef.current = true;
-
-    const availableWidth = Math.max(container.clientWidth - 8, 200);
-    const dpr = window.devicePixelRatio || 1;
-
-    for (let i = 1; i <= doc.numPages; i++) {
-      const canvas = container.children[i - 1] as HTMLCanvasElement | null;
-      if (!canvas || canvas.tagName !== "CANVAS") break;
-
-      const page = await doc.getPage(i);
-      const naturalVp = page.getViewport({ scale: 1 });
-      const scale = (availableWidth / naturalVp.width) * dpr;
-      const viewport = page.getViewport({ scale });
-
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      canvas.style.width = `${viewport.width / dpr}px`;
-      canvas.style.height = `${viewport.height / dpr}px`;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport }).promise;
-      }
-    }
-
-    isRenderingRef.current = false;
-    if (rerenderQueuedRef.current) {
-      rerenderQueuedRef.current = false;
-      void renderAll();
-    }
-  }, []);
+  const [status, setStatus] = useState<{ kind: "opening" } | { kind: "ready" } | { kind: "error"; message: string }>({
+    kind: "opening",
+  });
+  const onPageRef = useRef(onPage);
+  onPageRef.current = onPage;
+  const report = useCallback((p: number, t: number) => onPageRef.current(p, t), []);
 
   useEffect(() => {
+    let view: PdfPagesView | null = null;
     let cancelled = false;
-    setCanvasState({ kind: "loading" });
-    docRef.current?.destroy();
-    docRef.current = null;
-
-    pdfWorkerReady
-      .then(() =>
-        pdfjs.getDocument({
-          data: bytes.slice(),
-          disableRange: true,
-          disableStream: true,
-          isEvalSupported: false,
-        }).promise,
-      )
-      .then((doc) => {
-        if (cancelled) { doc.destroy(); return; }
-        docRef.current = doc;
-        setCanvasState({ kind: "ready", numPages: doc.numPages });
-      })
-      .catch((err: unknown) => {
-        if (!cancelled)
-          setCanvasState({ kind: "error", message: (err as Error).message ?? String(err) });
-      });
-
+    setStatus({ kind: "opening" });
+    openPdfBackend(bytes).then(
+      (backend) => {
+        if (cancelled || !containerRef.current) {
+          backend.destroy();
+          return;
+        }
+        view = new PdfPagesView(containerRef.current, backend, report);
+        view.mount();
+        setStatus({ kind: "ready" });
+      },
+      (err: unknown) => {
+        if (!cancelled) setStatus({ kind: "error", message: String((err as Error)?.message ?? err) });
+      },
+    );
     return () => {
       cancelled = true;
-      docRef.current?.destroy();
-      docRef.current = null;
+      view?.destroy();
+      if (containerRef.current) containerRef.current.replaceChildren();
     };
-  }, [bytes]);
-
-  useEffect(() => {
-    if (canvasState.kind !== "ready") return;
-    void renderAll();
-  }, [canvasState, renderAll]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    let timer: number;
-    const ro = new ResizeObserver(() => {
-      clearTimeout(timer);
-      timer = window.setTimeout(() => void renderAll(), 150);
-    });
-    ro.observe(container);
-    return () => { ro.disconnect(); clearTimeout(timer); };
-  }, [renderAll]);
+  }, [bytes, report]);
 
   return (
-    <div class="rp-pdf-canvas-container" ref={containerRef}>
-      {canvasState.kind === "loading" && (
-        <div class="rp-pdf-loading">Rendering PDF…</div>
+    <div class="rp-pdf-view">
+      {status.kind === "opening" && <Spinner label="Rendering PDF…" />}
+      {status.kind === "error" && (
+        <div class="rp-message rp-message-dark">
+          <p class="rp-message-title">This PDF couldn't be displayed</p>
+          <p class="rp-message-detail">{status.message}</p>
+        </div>
       )}
-      {canvasState.kind === "error" && (
-        <div class="rp-status rp-error">{canvasState.message}</div>
-      )}
-      {canvasState.kind === "ready" &&
-        Array.from({ length: canvasState.numPages }, (_, i) => (
-          <canvas key={i} class="rp-pdf-page" />
-        ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Firefox PDF renderer: delegates all rendering to the page's MAIN world via
-// the pageFetch.ts bridge to avoid Xray-wrapper restrictions on DOM APIs that
-// pdf.js calls internally (font measurement, canvas operations, etc.).
-// The MAIN world has no Xray restrictions, so pdf.js renders correctly there.
-// ---------------------------------------------------------------------------
-
-type FirefoxRenderState =
-  | { kind: "loading" }
-  | { kind: "error"; message: string }
-  | { kind: "ready"; pages: RenderedPdfPages };
-
-function PdfFirefoxRenderer({ bytes }: { bytes: Uint8Array }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [state, setState] = useState<FirefoxRenderState>({ kind: "loading" });
-  const revokeRef = useRef<string[]>([]);
-  // Keep a ref so the stable renderAtCurrentWidth callback always sees the latest bytes.
-  const bytesRef = useRef(bytes);
-  bytesRef.current = bytes;
-  // Prevent concurrent renders; queue one re-render if a resize arrives while rendering.
-  const isRenderingRef = useRef(false);
-  const rerenderQueuedRef = useRef(false);
-
-  // Revoke all blob URLs on unmount.
-  useEffect(() => {
-    return () => {
-      revokeRef.current.forEach(u => { try { URL.revokeObjectURL(u); } catch { /* ignore */ } });
-    };
-  }, []);
-
-  // Stable callback — reads container width at call time, like Chrome's renderAll().
-  const renderAtCurrentWidth = useCallback(async () => {
-    if (isRenderingRef.current) {
-      rerenderQueuedRef.current = true;
-      return;
-    }
-    isRenderingRef.current = true;
-    const availableWidth = Math.max((containerRef.current?.clientWidth ?? 0) - 8, 300) || 680;
-    try {
-      const pages = await renderPdfPagesInMainWorld(bytesRef.current, availableWidth);
-      revokeRef.current.forEach(u => { try { URL.revokeObjectURL(u); } catch { /* ignore */ } });
-      revokeRef.current = pages.pageUrls;
-      setState({ kind: "ready", pages });
-    } catch (err) {
-      setState({ kind: "error", message: (err as Error).message ?? String(err) });
-    } finally {
-      isRenderingRef.current = false;
-      if (rerenderQueuedRef.current) {
-        rerenderQueuedRef.current = false;
-        void renderAtCurrentWidth();
-      }
-    }
-  }, []); // stable — only uses refs
-
-  // Re-render from scratch when bytes change (new paper selected).
-  useEffect(() => {
-    setState({ kind: "loading" });
-    revokeRef.current.forEach(u => { try { URL.revokeObjectURL(u); } catch { /* ignore */ } });
-    revokeRef.current = [];
-    void renderAtCurrentWidth();
-  }, [bytes, renderAtCurrentWidth]);
-
-  // Re-render when the panel is resized (mirrors Chrome's ResizeObserver logic).
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    let timer: number;
-    const ro = new ResizeObserver(() => {
-      clearTimeout(timer);
-      timer = window.setTimeout(() => void renderAtCurrentWidth(), 150);
-    });
-    ro.observe(container);
-    return () => { ro.disconnect(); clearTimeout(timer); };
-  }, [renderAtCurrentWidth]);
-
-  return (
-    <div class="rp-pdf-canvas-container" ref={containerRef}>
-      {state.kind === "loading" && (
-        <div class="rp-pdf-loading">Rendering PDF…</div>
-      )}
-      {state.kind === "error" && (
-        <div class="rp-status rp-error">{state.message}</div>
-      )}
-      {state.kind === "ready" && state.pages.pageUrls.map((url, i) => {
-        const dim = state.pages.pageDimensions[i];
-        return (
-          <img
-            key={i}
-            src={url}
-            class="rp-pdf-page"
-            width={dim?.cssWidth}
-            height={dim?.cssHeight}
-            alt={`Page ${i + 1}`}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-// Dispatches to the browser-appropriate renderer.
-function PdfCanvasRenderer({ bytes }: { bytes: Uint8Array }) {
-  if (__BROWSER__ === "firefox") {
-    return <PdfFirefoxRenderer bytes={bytes} />;
-  }
-  return <PdfChromeRenderer bytes={bytes} />;
-}
-
-// ---------------------------------------------------------------------------
-// Panel header with drag support
-// ---------------------------------------------------------------------------
-
-function PanelHeader({ title, onClose }: { title: string; onClose: () => void }) {
-  const headerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const header = headerRef.current;
-    if (!header) return;
-    const panel = header.closest(".rp-panel") as HTMLElement | null;
-    if (!panel) return;
-
-    let startX = 0, startY = 0, originLeft = 0, originTop = 0, dragging = false;
-
-    const onDown = (e: PointerEvent) => {
-      if ((e.target as HTMLElement).closest(".rp-close")) return;
-      dragging = true;
-      const rect = panel.getBoundingClientRect();
-      originLeft = rect.left; originTop = rect.top;
-      startX = e.clientX; startY = e.clientY;
-      panel.style.right = "auto";
-      panel.style.left = `${originLeft}px`;
-      panel.style.top = `${originTop}px`;
-      header.setPointerCapture(e.pointerId);
-    };
-    const onMove = (e: PointerEvent) => {
-      if (!dragging) return;
-      panel.style.left = `${originLeft + (e.clientX - startX)}px`;
-      panel.style.top = `${originTop + (e.clientY - startY)}px`;
-    };
-    const onUp = (e: PointerEvent) => {
-      dragging = false;
-      try { header.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    };
-
-    header.addEventListener("pointerdown", onDown);
-    header.addEventListener("pointermove", onMove);
-    header.addEventListener("pointerup", onUp);
-    return () => {
-      header.removeEventListener("pointerdown", onDown);
-      header.removeEventListener("pointermove", onMove);
-      header.removeEventListener("pointerup", onUp);
-    };
-  }, []);
-
-  const short = title.length > 80 ? title.slice(0, 80) + "…" : title;
-  const logoUrl =
-    typeof chrome !== "undefined" && chrome.runtime?.getURL
-      ? chrome.runtime.getURL("icons/icon-48.png")
-      : "";
-
-  return (
-    <div class="rp-header" ref={headerRef}>
-      {logoUrl && <img class="rp-header-logo" src={logoUrl} width="18" height="18" alt="" />}
-      <span class="rp-header-title" title={title}>{short}</span>
-      <button class="rp-close" onClick={onClose} aria-label="Close">✕</button>
+      <div class="rp-pdf-pages" ref={containerRef} />
     </div>
   );
 }

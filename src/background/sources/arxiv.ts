@@ -1,6 +1,7 @@
 // arXiv client: queries the Atom API by id or title. Parsed with regex since the
 // MV3 service worker has no DOMParser.
 import type { PaperCandidate, ParsedReference } from "@shared/types";
+import { apiFetch } from "./http";
 
 const API = "https://export.arxiv.org/api/query";
 
@@ -33,8 +34,10 @@ function parseEntry(entry: string): PaperCandidate | null {
   if (!title) return null;
   const summary = tag(entry, "summary");
   const idUrl = tag(entry, "id") ?? "";
-  const idMatch = idUrl.match(/abs\/([^v]+(?:v\d+)?)/);
-  const arxivId = idMatch ? idMatch[1] : undefined;
+  // Error feeds come back as an <entry> titled "Error" with a non-abs id; skip them.
+  const idMatch = idUrl.match(/arxiv\.org\/abs\/(.+?)(?:v\d+)?$/);
+  if (!idMatch) return null;
+  const arxivId = idMatch[1];
 
   const authors: string[] = [];
   const authorBlocks = entry.match(/<author>[\s\S]*?<\/author>/gi) ?? [];
@@ -75,12 +78,9 @@ function parseFeed(xml: string): PaperCandidate[] {
     .filter((c): c is PaperCandidate => c !== null);
 }
 
-const TIMEOUT_MS = 10_000;
 
 export async function arxivById(id: string): Promise<PaperCandidate | null> {
-  const res = await fetch(`${API}?id_list=${encodeURIComponent(id)}&max_results=1`, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const res = await apiFetch(`${API}?id_list=${encodeURIComponent(id)}&max_results=1`);
   if (!res.ok) return null;
   const xml = await res.text();
   return parseFeed(xml)[0] ?? null;
@@ -88,11 +88,11 @@ export async function arxivById(id: string): Promise<PaperCandidate | null> {
 
 export async function arxivSearch(ref: ParsedReference): Promise<PaperCandidate[]> {
   if (!ref.title) return [];
-  const q = `ti:"${ref.title.replace(/"/g, "")}"`;
-  const res = await fetch(
-    `${API}?search_query=${encodeURIComponent(q)}&max_results=5`,
-    { signal: AbortSignal.timeout(TIMEOUT_MS) },
-  );
+  // Exact-phrase title search; arXiv's query parser chokes on most punctuation.
+  const cleaned = ref.title.replace(/[^\p{L}\p{N}\s-]+/gu, " ").replace(/\s+/g, " ").trim();
+  if (cleaned.length < 8) return [];
+  const q = `ti:"${cleaned}"`;
+  const res = await apiFetch(`${API}?search_query=${encodeURIComponent(q)}&max_results=5`);
   if (!res.ok) return [];
   return parseFeed(await res.text());
 }

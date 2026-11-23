@@ -3,8 +3,9 @@
 Hover a citation in a paper, click **Show preview**, and instantly see the cited paper's
 PDF (or abstract) in a draggable, resizable floating panel — without leaving the page.
 
-Works in **Overleaf** and **pdf.js-based PDF viewers**. Fully client-side: no backend, no
-account, no tracking. Looks papers up via **Crossref**, **arXiv**, and **Semantic Scholar**.
+Works in **Overleaf**, **pdf.js-based PDF viewers**, and its own bundled viewer, on
+**Chrome, Edge and Firefox**. Fully client-side: no backend, no account, no tracking. Looks
+papers up via **Semantic Scholar**, **arXiv**, **Crossref**, and **OpenAlex** (fallback).
 
 ## Install
 
@@ -18,22 +19,31 @@ download `glimpse-chrome.zip`, `glimpse-edge.zip`, or `glimpse-firefox.zip` from
 
 ## How it works
 
-1. The extension reads the PDF's internal hyperref links to find the exact bibliography
-   entry a citation points to.
-2. It parses the entry for DOI / arXiv ID / title / authors / year.
-3. It queries Crossref, arXiv, and Semantic Scholar, then ranks candidates by confidence.
-4. It shows the best match with a confidence banner (and selectable alternatives), embedding
-   the open-access PDF when available or falling back to the abstract + metadata.
+1. A tiny loader script (≈2 KB) runs on pages and only looks for a supported viewer. When it
+   finds one — at load, or on the first hover over a pdf.js link for viewers that render
+   late — the background injects the full content script into that frame only.
+2. The extension reads the PDF's internal hyperref links to find the exact bibliography
+   entry a citation points to (column-aware, including entries that wrap across columns).
+3. It parses the entry for DOI / arXiv ID / title / authors / year.
+4. It queries Semantic Scholar and arXiv (plus Crossref for DOIs) in parallel, falling back
+   to OpenAlex and Crossref search when nothing convincing comes back, and ranks candidates
+   by confidence. Rate-limited requests are retried once; misses are never cached.
+5. It shows the best match with a confidence banner (and selectable alternatives), and
+   renders the open-access PDF page-by-page on demand, or the abstract + metadata.
+
+Panel tips: drag the header to move, drag either bottom corner to resize (position and size
+are remembered), press <kbd>Esc</kbd> to close.
 
 ## Project layout
 
 ```
 src/
-  shared/        Types, messaging, settings, reference parser (shared everywhere)
-  content/       Content script: env detection, hover detection, PDF parsing, tooltip
-    panel/       Preact preview-panel UI (mounted in a shadow root)
+  shared/        Types, messaging, settings, reference parser, bibliography extraction
+  content/       loader.ts (tiny, every page) + full content script (injected on demand):
+                 hover detection, PDF parsing, tooltip; pageFetch.ts = page main-world bridge
+    panel/       Preact preview-panel UI + lazy PDF page renderer (in a shadow root)
   background/    Service worker: source clients, matching/ranking, PDF fetch, cache
-    sources/     Crossref / arXiv / Semantic Scholar clients
+    sources/     Semantic Scholar / arXiv / Crossref / OpenAlex clients
   viewer/        Bundled pdf.js viewer page (for local / native-viewer PDFs)
   options/       Preact options page
 scripts/         esbuild build, icon generator, packaging
@@ -52,31 +62,48 @@ Glimpse ships its own **bundled pdf.js viewer** to cover those cases:
 - The bundled viewer renders the text + link layers, so the same citation detection applies.
 
 To open local `file://` PDFs this way in Chrome/Edge, enable **Allow access to file URLs**
-on the extension's details page.
+on the extension's details page; otherwise (and always on Firefox, which never lets
+extensions read local files) the viewer asks you to pick the file. You can also drop a PDF
+onto the popup or anywhere on the viewer.
 
-> A fully automatic redirect of every PDF into the bundled viewer was intentionally **not**
-> added: there's no reliable way to exclude the viewer's own requests from a static redirect
-> rule, risking redirect loops. Explicit toolbar/context-menu opening is used instead.
+The toolbar popup recognises PDF tabs even without a `.pdf` URL (e.g. `arxiv.org/pdf/…`).
+
+**When you open a PDF in the browser's own viewer** (Glimpse can't run inside it), the
+behaviour is set in the popup or settings — *When I open a PDF*:
+
+- **Suggest Glimpse** (default) — Chrome/Edge show a small *Open in Glimpse* card over the
+  PDF; Firefox, which allows nothing over its viewer, shows a Glimpse button in the
+  address bar. The toolbar button also gets a *PDF* badge.
+- **Open in Glimpse** — PDFs open straight in the bundled viewer (Firefox redirects before
+  the PDF renders; Chrome/Edge switch the tab as soon as the PDF is detected).
+- **Do nothing** — use the toolbar button when you want Glimpse.
+
+Downloads, PDFs returned by form submissions, and embedded PDFs are never touched. In the
+viewer, **Open in browser's viewer** goes back to the native viewer for that PDF (e.g. to
+print or fill a form), and **Download** saves it.
 
 ## Troubleshooting
 
-The extension logs to the page's DevTools console, prefixed with `[Glimpse]`.
-Open DevTools (F12) → Console and look for lines such as:
+Debug logging is compiled out of release builds. Build with `node scripts/build.mjs
+--target=chrome --dev` (or `--target=firefox --dev`, or `npm run watch`) to get unminified
+code that logs to the page's DevTools console, prefixed with `[Glimpse]`:
 
-- `bootstrap on … -> environment: overleaf | pdfjs | null` — whether the page was recognized.
+- `starting on … -> environment: overleaf | pdfjs` — the page was recognized and activated.
 - `detector start; … initial pdfUrl = …` — the PDF URL it located (or `null`).
 - `building reference index from …` / `index built: N citation link(s) …` — PDF parsing result.
 
 Common cases:
-- **`environment: null`** on a PDF tab → you're in the browser's **built-in PDF viewer**,
+- **Nothing happens on a PDF tab** → you're in the browser's **built-in PDF viewer**,
   which extensions cannot access. Click the **Glimpse toolbar button** to reopen
   the PDF in the bundled viewer, or use a pdf.js-based viewer or Overleaf instead.
+- **Firefox: popup says "Glimpse needs access to websites"** → click *Allow access*
+  (Firefox lets you withhold host access from MV3 extensions; without it nothing runs).
 - **No tooltip on hover in Overleaf** → the PDF's link/annotation layer wasn't found; please
   report the console output.
 - **Tooltip shows but preview errors** → the console + panel show why (e.g. the PDF URL
   couldn't be fetched, or the link has no bibliography destination).
 
-Toggle logging via `DEBUG` in `src/shared/debug.ts`.
+Click the toolbar button on a supported page: the popup says whether Glimpse is active there.
 
 ## Build
 

@@ -1,19 +1,26 @@
 // Cross-browser pdf.js worker configuration.
 //
-// Chrome/Edge: load the bundled worker file as a real Web Worker (fast, off-thread).
+// Extension pages (bundled viewer) and Chrome/Edge content scripts: load the bundled
+// worker file as a real Web Worker (fast, off the main thread).
 //
-// Firefox: a real Worker spawned from a content script runs in a separate compartment.
-// pdf.js's MessageHandler streams data between threads using `ReadableStream`, and Firefox's
-// Xray security wrappers deny access to cross-compartment stream internals (the
-// "Permission denied to access property autoAllocateChunkSize" error). To avoid this we run
-// pdf.js entirely on the main thread by registering the worker's message handler on
-// `globalThis.pdfjsWorker`; pdf.js then uses an in-process LoopbackPort (single compartment),
-// which sidesteps the Xray restriction completely.
+// Firefox *content scripts*: a Worker spawned from a content script runs in a separate
+// compartment, and Firefox's Xray wrappers deny pdf.js access to cross-compartment
+// ReadableStream internals ("Permission denied to access property autoAllocateChunkSize").
+// There, rendering is delegated to the page's main world (see pageFetch.ts), and any
+// pdf.js use left in the content script runs single-threaded via `globalThis.pdfjsWorker`.
 
 import * as pdfjs from "pdfjs-dist";
 
+/** Running inside one of our own extension pages (viewer, popup, options). */
+export const IN_EXTENSION_PAGE =
+  typeof location !== "undefined" && /^(chrome|moz)-extension:$/.test(location.protocol);
+
+/** Firefox content scripts must do pdf.js rendering in the page's main world. */
+export const USE_MAIN_WORLD = __BROWSER__ === "firefox" && !IN_EXTENSION_PAGE;
+
 export const pdfWorkerReady: Promise<void> = (() => {
-  if (__BROWSER__ === "firefox") {
+  // Spelled out (not USE_MAIN_WORLD) so esbuild drops the 1.3 MB worker from Chrome builds.
+  if (__BROWSER__ === "firefox" && !IN_EXTENSION_PAGE) {
     return import("pdfjs-dist/build/pdf.worker.mjs").then((worker) => {
       (globalThis as Record<string, unknown>).pdfjsWorker = {
         WorkerMessageHandler: (worker as { WorkerMessageHandler: unknown }).WorkerMessageHandler,

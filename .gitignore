@@ -2,3 +2,6 @@ node_modules/
 dist/
 *.zip
 .DS_Store
+
+# Papers dropped in the repo root for local debugging (may be unpublished work).
+/*.pdf

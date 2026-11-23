@@ -1,5 +1,6 @@
 // Semantic Scholar Graph API client.
 import type { PaperCandidate, ParsedReference } from "@shared/types";
+import { apiFetch } from "./http";
 
 const BASE = "https://api.semanticscholar.org/graph/v1/paper";
 const FIELDS = "title,authors,year,abstract,openAccessPdf,externalIds,venue";
@@ -39,12 +40,9 @@ function toCandidate(p: S2Paper, confidence = 0): PaperCandidate | null {
   };
 }
 
-const TIMEOUT_MS = 10_000;
 
 async function getById(idExpr: string): Promise<PaperCandidate | null> {
-  const res = await fetch(`${BASE}/${idExpr}?fields=${FIELDS}`, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const res = await apiFetch(`${BASE}/${idExpr}?fields=${FIELDS}`);
   if (!res.ok) return null;
   return toCandidate((await res.json()) as S2Paper);
 }
@@ -75,9 +73,7 @@ export async function s2Match(ref: ParsedReference): Promise<PaperCandidate | nu
   if (title.length < 5) return null;
 
   const params = new URLSearchParams({ query: title.slice(0, 300), fields: FIELDS });
-  const res = await fetch(`${BASE}/search/match?${params.toString()}`, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const res = await apiFetch(`${BASE}/search/match?${params.toString()}`);
   if (!res.ok) return null;
 
   const json = (await res.json()) as { data?: S2Paper[]; error?: string };
@@ -92,9 +88,7 @@ export async function s2Match(ref: ParsedReference): Promise<PaperCandidate | nu
 export async function s2Search(ref: ParsedReference): Promise<PaperCandidate[]> {
   const query = ref.title ?? ref.raw.slice(0, 200);
   const params = new URLSearchParams({ query, limit: "5", fields: FIELDS });
-  const res = await fetch(`${BASE}/search?${params.toString()}`, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const res = await apiFetch(`${BASE}/search?${params.toString()}`);
   if (!res.ok) return [];
   const json = (await res.json()) as { data?: S2Paper[] };
   return (json.data ?? [])

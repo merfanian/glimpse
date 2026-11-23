@@ -176,3 +176,17 @@ describe("findReferenceAt", () => {
     expect(findReferenceAt(index, 1, normX, normY)).toBe(ref1);
   });
 });
+
+describe("findReferenceByHref — pdf.js escape() encoding", () => {
+  it("resolves non-ASCII destination names encoded with escape()", () => {
+    const ref = makeRef("Müller paper");
+    const index = makeIndex([{ srcPage: 1, rect: [0, 0, 1, 1], destKey: "cite.Müller2020", reference: ref }]);
+    expect(findReferenceByHref(index, `#${escape("cite.Müller2020")}`)).toBe(ref);
+  });
+
+  it("resolves percent-encoded colons in natbib keys", () => {
+    const ref = makeRef("Deep contextualized word representations");
+    const index = makeIndex([{ srcPage: 1, rect: [0, 0, 1, 1], destKey: "cite.peters-etal:2018:_deep", reference: ref }]);
+    expect(findReferenceByHref(index, "#cite.peters-etal%3A2018%3A_deep")).toBe(ref);
+  });
+});

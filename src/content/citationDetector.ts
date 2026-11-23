@@ -1,5 +1,6 @@
-// Detects the host viewer (Overleaf / pdf.js), locates the document PDF, and watches
-// for hovers over internal citation links, surfacing a "Show preview" affordance.
+// Watches for hovers over internal citation links in a pdf.js-based viewer (Overleaf,
+// generic pdf.js pages, the bundled viewer), surfaces a "Preview" affordance, and resolves
+// the hovered link to its bibliography entry.
 import {
   loadDocument,
   buildReferenceIndex,
@@ -12,25 +13,20 @@ import type { ParsedReference } from "@shared/types";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { log, warn } from "@shared/debug";
 import { isNonBibliographyDestKey } from "@shared/refparse";
+import type { Environment } from "./env";
 
-export type Environment = "overleaf" | "pdfjs" | null;
+export type { Environment } from "./env";
 
 export interface DetectorCallbacks {
   showTooltip(anchorRect: DOMRect): void;
+  /** Hide after a grace period (the user may be moving onto the tooltip). */
   hideTooltip(): void;
+  /** Hide right away (scroll, Escape, …) unless the pointer is on the tooltip. */
+  hideTooltipNow(): void;
+  tooltipVisible(): boolean;
+  openLoading(): void;
   openPanel(ref: ParsedReference): void;
   openError(title: string, detail: string): void;
-}
-
-export function detectEnvironment(): Environment {
-  const host = location.hostname;
-  if (host.endsWith("overleaf.com")) return "overleaf";
-
-  // pdf.js viewer signals: the standard viewer DOM, a .pdf document, or a file= param.
-  if (document.querySelector("#viewer.pdfViewer, .pdfViewer, #viewerContainer")) return "pdfjs";
-  if (/\.pdf($|[?#])/i.test(location.pathname + location.search)) return "pdfjs";
-  if (new URLSearchParams(location.search).has("file")) return "pdfjs";
-  return null;
 }
 
 /** Best-effort discovery of the URL of the PDF being displayed. */
@@ -65,6 +61,16 @@ export function findPdfUrl(env: Environment): string | null {
   const iframe = document.querySelector<HTMLIFrameElement>('iframe[src*=".pdf"], iframe[src^="blob:"]');
   if (iframe?.src) return iframe.src;
 
+  // Last resort: a PDF the page itself downloaded (self-hosted Overleaf, custom viewers).
+  try {
+    const hit = (performance.getEntriesByType("resource") as PerformanceResourceTiming[])
+      .map((e) => e.name)
+      .filter((n) => /\.pdf($|[?#])/i.test(n))
+      .pop();
+    if (hit) return hit;
+  } catch {
+    /* ignore */
+  }
   return null;
 }
 
@@ -135,6 +141,12 @@ function resolvePageHit(target: Element, clientX: number, clientY: number): Page
   };
 }
 
+/** Page hit at the centre of the link (independent of where the pointer is now). */
+function anchorPageHit(anchor: HTMLElement): PageHit | null {
+  const r = anchor.getBoundingClientRect();
+  return resolvePageHit(anchor, r.left + r.width / 2, r.top + r.height / 2);
+}
+
 export class CitationDetector {
   private index: ReferenceIndex | null = null;
   private indexPromise: Promise<ReferenceIndex | null> | null = null;
@@ -143,11 +155,11 @@ export class CitationDetector {
   private preloadedDoc: PDFDocumentProxy | null = null;
   private perfObserver: PerformanceObserver | null = null;
 
+  /** Anchor the visible tooltip belongs to (what "Preview" will open). */
   private currentAnchor: HTMLElement | null = null;
-  private lastX = 0;
-  private lastY = 0;
-  /** Timestamp (ms) of the last showTooltip call. Used to debounce anchor switches. */
-  private tooltipShownAt = 0;
+  /** Anchor under the pointer, waiting for the hover-intent delay. */
+  private pendingAnchor: HTMLElement | null = null;
+  private pendingTimer: number | null = null;
 
   constructor(
     private readonly env: Environment,
@@ -213,16 +225,26 @@ export class CitationDetector {
     }
 
     document.addEventListener("pointerover", this.handlePointerOver, true);
-    document.addEventListener("pointermove", this.handlePointerMove, true);
     document.addEventListener("pointerout", this.handlePointerOut, true);
+    // The tooltip is positioned in viewport coordinates; any scroll makes it stale.
+    document.addEventListener("scroll", this.handleScroll, { capture: true, passive: true });
+    window.addEventListener("blur", this.handleScroll);
   }
 
   stop(): void {
     this.perfObserver?.disconnect();
     this.perfObserver = null;
+    this.cancelPending();
     document.removeEventListener("pointerover", this.handlePointerOver, true);
-    document.removeEventListener("pointermove", this.handlePointerMove, true);
     document.removeEventListener("pointerout", this.handlePointerOut, true);
+    document.removeEventListener("scroll", this.handleScroll, true);
+    window.removeEventListener("blur", this.handleScroll);
+  }
+
+  /** Treat `el` as hovered right now (used when lazy activation was triggered by a hover). */
+  primeHover(el: Element): void {
+    const anchor = this.citationAnchor(el);
+    if (anchor && anchor.isConnected && anchor.matches(":hover")) this.considerAnchor(anchor, 0);
   }
 
   private async ensureIndex(): Promise<ReferenceIndex | null> {
@@ -326,12 +348,6 @@ export class CitationDetector {
     return null;
   }
 
-  private handlePointerMove = (e: Event): void => {
-    const me = e as PointerEvent;
-    this.lastX = me.clientX;
-    this.lastY = me.clientY;
-  };
-
   /**
    * Returns true if the given anchor resolves to a known bibliography entry in the
    * current index, using the same href + coordinate fallback as previewCurrent().
@@ -339,7 +355,7 @@ export class CitationDetector {
    * UNLESS the href can be immediately identified as a non-bibliography destination
    * from its dest-key prefix alone (section.*, figure.*, table.*, …).
    */
-  private isKnownReference(anchor: HTMLElement, clientX: number, clientY: number): boolean {
+  private isKnownReference(anchor: HTMLElement): boolean {
     const href = anchor.getAttribute("href") ?? "";
 
     // Fast pre-filter: reject links whose href fragment is a hyperref-style
@@ -358,55 +374,83 @@ export class CitationDetector {
 
     if (!this.index) return true; // index still building — allow remaining links
     if (findReferenceByHref(this.index, href)) return true;
-    const hit = resolvePageHit(anchor, clientX, clientY);
+    const hit = anchorPageHit(anchor);
     if (hit && findReferenceAt(this.index, hit.pageNumber, hit.normX, hit.normY)) return true;
     return false;
   }
 
-  private handlePointerOver = (e: Event): void => {
-    const target = e.target as Element | null;
-    if (!target) return;
-    const anchor = this.citationAnchor(target);
-    if (!anchor) return;
+  private cancelPending(): void {
+    if (this.pendingTimer != null) clearTimeout(this.pendingTimer);
+    this.pendingTimer = null;
+    this.pendingAnchor = null;
+  }
 
-    const me = e as PointerEvent;
-    this.lastX = me.clientX;
-    this.lastY = me.clientY;
-
-    if (!this.isKnownReference(anchor, me.clientX, me.clientY)) return;
-
-    // If the tooltip was shown recently for a DIFFERENT anchor, ignore this event.
-    // The user is likely moving their cursor toward the already-visible tooltip
-    // and is inadvertently crossing an adjacent reference link. Switching the
-    // tooltip immediately in that window would cause it to jump unpredictably.
-    const SWITCH_LOCK_MS = 500;
-    if (anchor !== this.currentAnchor && Date.now() - this.tooltipShownAt < SWITCH_LOCK_MS) {
+  /**
+   * Hover intent: show the tooltip for `anchor` after a short delay, so sweeping the
+   * pointer across text doesn't flash it, and so crossing a neighbouring citation on the
+   * way to an already-visible tooltip doesn't steal it. Unlike a hard time lock, a
+   * deliberate hover over a different citation (e.g. the "2" in "[1, 2]") always wins.
+   */
+  private considerAnchor(anchor: HTMLElement, delay?: number): void {
+    if (!this.isKnownReference(anchor)) return;
+    if (anchor === this.currentAnchor && this.cb.tooltipVisible()) {
+      this.cancelPending();
+      this.cb.showTooltip(anchor.getBoundingClientRect()); // keeps it open, re-anchors
       return;
     }
+    if (anchor === this.pendingAnchor) return;
+    this.cancelPending();
+    this.pendingAnchor = anchor;
+    const wait = delay ?? (this.cb.tooltipVisible() ? 260 : 90);
+    this.pendingTimer = window.setTimeout(() => {
+      this.pendingTimer = null;
+      if (this.pendingAnchor !== anchor || !anchor.isConnected) return;
+      this.pendingAnchor = null;
+      this.currentAnchor = anchor;
+      this.cb.showTooltip(anchor.getBoundingClientRect());
+    }, wait);
+  }
 
-    this.currentAnchor = anchor;
-    this.tooltipShownAt = Date.now();
-    this.cb.showTooltip(anchor.getBoundingClientRect());
+  private handlePointerOver = (e: Event): void => {
+    const target = e.target as Element | null;
+    if (!target || typeof target.closest !== "function") return;
+    const anchor = this.citationAnchor(target);
+    if (!anchor) return;
+    this.considerAnchor(anchor);
   };
 
   private handlePointerOut = (e: Event): void => {
     const target = e.target as Element | null;
-    if (target && this.citationAnchor(target) === this.currentAnchor) {
-      // Schedule hide — the tooltip's own pointerenter will cancel it if the user
-      // moves onto the tooltip chip. Do NOT clear currentAnchor here: the user may
-      // be moving toward the tooltip to click it, and previewCurrent() needs the ref.
-      this.cb.hideTooltip();
-    }
+    if (!target || typeof target.closest !== "function") return;
+    const anchor = this.citationAnchor(target);
+    if (!anchor) return;
+    const related = (e as PointerEvent).relatedTarget as Node | null;
+    if (related && anchor.contains(related)) return; // moving within the link
+    if (anchor === this.pendingAnchor) this.cancelPending();
+    if (anchor === this.currentAnchor) this.cb.hideTooltip();
   };
 
-  /** Invoked when the user clicks the "Show preview" tooltip. */
+  private handleScroll = (): void => {
+    this.cancelPending();
+    if (this.cb.tooltipVisible()) this.cb.hideTooltipNow();
+  };
+
+  /** Invoked when the user activates the "Preview" tooltip. */
   async previewCurrent(): Promise<void> {
     const anchor = this.currentAnchor;
     if (!anchor) return;
 
-    const index = await this.ensureIndex();
+    // Building the index can take a few seconds on first use; show progress right away.
+    let index = this.index;
     if (!index) {
-      this.cb.openError("Can't preview this citation", this.indexError || "Unknown error.");
+      this.cb.openLoading();
+      index = await this.ensureIndex();
+    }
+    if (!index) {
+      this.cb.openError(
+        "Couldn't read this PDF's bibliography",
+        this.indexError || "The PDF could not be loaded. Try again in a moment.",
+      );
       return;
     }
 
@@ -417,15 +461,16 @@ export class CitationDetector {
 
     // Fallback: coordinate-based lookup (in case href is empty or unmatched).
     if (!ref) {
-      const hit = resolvePageHit(anchor, this.lastX, this.lastY);
+      const hit = anchorPageHit(anchor);
       if (hit) ref = findReferenceAt(index, hit.pageNumber, hit.normX, hit.normY);
     }
 
     if (!ref) {
       log("no ref found; href =", href, "; byDest keys sample:", [...index.byDest.keys()].slice(0, 5));
       this.cb.openError(
-        "No reference found",
-        "This link doesn't point to a bibliography entry, or it couldn't be read.",
+        "This link isn't a bibliography reference",
+        "It points somewhere else in the document (a section, figure or equation), or its " +
+          "bibliography entry couldn't be read from the PDF.",
       );
       return;
     }
