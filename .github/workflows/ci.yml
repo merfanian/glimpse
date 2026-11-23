@@ -29,3 +29,6 @@ jobs:
         run: |
           npm run build:chrome
           npm run build:firefox
+
+      - name: Release notes exist for the current version
+        run: node scripts/changelog-section.mjs "$(node -p "require('./package.json').version")" > /dev/null

@@ -1,0 +1,32 @@
+BUILD (reproduces the uploaded package byte-for-byte):
+  Requirements: Node.js 20.19+ or 22.12+, npm. Linux/macOS/Windows.
+  Unzip the attached source, then in its folder:
+    npm ci
+    npm run build:firefox        # output: dist/firefox/
+Third-party code comes only from npm (pdfjs-dist, preact) and is bundled by esbuild
+(scripts/build.mjs). Nothing is downloaded or executed remotely.
+
+LINTER WARNINGS come from bundled libraries:
+- "Function constructor is eval": pdf.js's optional font-compilation path. Glimpse always
+  calls pdf.js with isEvalSupported:false, so it is never used.
+- innerHTML / dynamic import(): inside Preact and pdf.js. Glimpse's own innerHTML uses are
+  static string literals.
+
+PERMISSIONS
+- <all_urls>: research PDFs live on any domain; we read the PDF being viewed, fetch cited
+  papers' open-access PDFs, and call the Semantic Scholar/arXiv/Crossref/OpenAlex APIs.
+- webRequest/webRequestBlocking: onHeadersReceived on top-level documents to recognise PDF
+  responses and, only if the user chose "Always", redirect them to the bundled viewer
+  (viewer.html, therefore web-accessible).
+- webRequestFilterResponse: only for compiles.overleafusercontent.com output.pdf, to reuse
+  the compiled PDF bytes Overleaf already downloads. The response passes through unmodified.
+- scripting: injects content-main.js only into frames that contain a PDF viewer.
+- pagefetch.js runs in the page's own context only on PDF-viewer pages: pdf.js cannot render
+  inside Firefox's content-script compartment (Xray wrappers), so preview pages are rendered
+  there and returned as blob URLs.
+
+HOW TO TEST
+1. Open https://arxiv.org/pdf/1706.03762 and click the Glimpse button in the address bar
+   (or the toolbar button -> "Open this PDF in Glimpse").
+2. In Glimpse's viewer, hover a citation such as "[13]" and click "Preview".
+3. The panel shows the cited paper's abstract; "Full PDF" renders it.
