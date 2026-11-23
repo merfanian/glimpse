@@ -98,9 +98,9 @@ in a floating panel.
 | <img src="https://img.shields.io/badge/-Firefox-FF7139?logo=firefoxbrowser&logoColor=white" alt=""> | **[Get Glimpse for Firefox](https://addons.mozilla.org/en-US/firefox/addon/glimpse-citation-preview-tool/)** |
 | <img src="https://img.shields.io/badge/-Edge-0078D7?logo=microsoftedge&logoColor=white" alt=""> | Edge Add-ons — *in review, link coming soon* |
 
-Until the Chrome and Edge listings are live, download `glimpse-chrome.zip` or
-`glimpse-edge.zip` from the [latest release](https://github.com/merfanian/glimpse/releases)
-and [load it unpacked](#load-unpacked), or [build it from source](#development).
+Until the Chrome and Edge listings are live, download `glimpse-chrome-edge-<version>.zip`
+from the [latest release](https://github.com/merfanian/glimpse/releases/latest) and
+[load it unpacked](#load-unpacked), or [build it from source](#development).
 
 ## Using Glimpse
 
@@ -236,22 +236,18 @@ the published Firefox package byte-for-byte. All third-party code comes from npm
 <details>
 <summary><b>Releases &amp; store publishing</b></summary>
 
-CI type-checks, tests and builds every push and pull request. Pushing a version tag cuts a
-release:
+Releases are automated. Add a section to [CHANGELOG.md](CHANGELOG.md), then:
 
 ```bash
-git tag v1.2.0 && git push origin v1.2.0
+npm version 1.2.1          # bumps the version, commits, tags v1.2.1
+git push --follow-tags
 ```
 
-The release workflow builds all targets, attaches the zips to a GitHub Release, and — when the
-repository secrets below are set — uploads the new version to each store. A store whose
-secrets are missing is skipped.
-
-| Store | Secrets |
-| --- | --- |
-| Chrome Web Store | `CHROME_EXTENSION_ID`, `CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`, `CHROME_REFRESH_TOKEN` |
-| Microsoft Edge Add-ons | `EDGE_PRODUCT_ID`, `EDGE_CLIENT_ID`, `EDGE_API_KEY` |
-| Firefox Add-ons | `FIREFOX_JWT_ISSUER`, `FIREFOX_JWT_SECRET` |
+The [release workflow](.github/workflows/release.yml) builds and verifies the extension,
+creates a GitHub Release with the changelog notes and packages, and uploads the new version
+to the Chrome Web Store, Firefox Add-ons (with source code for review) and Edge Add-ons —
+each one once its API credentials are added as repository secrets. Setup steps:
+[docs/RELEASING.md](docs/RELEASING.md).
 
 Safari isn't built here; it needs Xcode (`xcrun safari-web-extension-converter dist/chrome`).
 

@@ -1,155 +1,207 @@
 name: Release
 
-# Builds installable packages for Chrome, Edge, and Firefox, publishes them to a
-# GitHub Release, and (when the relevant store secrets are configured) uploads the
-# latest version to the Chrome Web Store, Microsoft Edge Add-ons, and Firefox AMO.
+# Pushing a version tag (vX.Y.Z) builds, verifies and packages Glimpse, publishes a GitHub
+# Release with notes from CHANGELOG.md, and uploads the new version to every store whose
+# secrets are configured (Chrome Web Store, Firefox Add-ons, Microsoft Edge Add-ons).
 #
-# Trigger a release by pushing a version tag, e.g.:
-#   npm version 0.2.0 --no-git-tag-version   # optional: keep package.json in sync
-#   git tag v0.2.0 && git push origin v0.2.0
+# Cut a release (see docs/RELEASING.md):
+#   1. Add a "## [X.Y.Z]" section to CHANGELOG.md and commit it.
+#   2. npm version X.Y.Z        # bumps package.json + lock, commits, creates tag vX.Y.Z
+#   3. git push --follow-tags
 #
-# The packaged extension version is taken from the tag (vX.Y.Z) so it always matches
-# the release. Manual runs (workflow_dispatch) build artifacts without publishing.
+# Manual runs (Actions → Release → Run workflow) only build and upload the packages as a
+# workflow artifact; they never create releases or publish to stores.
 
 on:
   push:
     tags:
-      - "v*"
+      - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
+    name: Build & verify
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.meta.outputs.version }}
-      publish_chrome: ${{ steps.flags.outputs.chrome }}
-      publish_edge: ${{ steps.flags.outputs.edge }}
-      publish_firefox: ${{ steps.flags.outputs.firefox }}
+      version: ${{ steps.version.outputs.version }}
+      is_release: ${{ steps.version.outputs.is_release }}
+      chrome: ${{ steps.stores.outputs.chrome }}
+      firefox: ${{ steps.stores.outputs.firefox }}
+      edge: ${{ steps.stores.outputs.edge }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Detect configured stores
-        id: flags
-        env:
-          CHROME: ${{ secrets.CHROME_EXTENSION_ID }}
-          EDGE: ${{ secrets.EDGE_PRODUCT_ID }}
-          FIREFOX: ${{ secrets.FIREFOX_JWT_ISSUER }}
-        run: |
-          is_tag=${{ startsWith(github.ref, 'refs/tags/') }}
-          emit() { [[ "$is_tag" == "true" && -n "$2" ]] && echo "$1=true" >> "$GITHUB_OUTPUT" || echo "$1=false" >> "$GITHUB_OUTPUT"; }
-          emit chrome "$CHROME"
-          emit edge "$EDGE"
-          emit firefox "$FIREFOX"
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
-      - run: npm ci
-
-      - name: Derive version
-        id: meta
+      - name: Determine version
+        id: version
         run: |
-          REF="${GITHUB_REF#refs/tags/}"
-          if [[ "$REF" == v* ]]; then
-            VERSION="${REF#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+            if [[ "$TAG_VERSION" != "$PKG_VERSION" ]]; then
+              echo "::error::Tag v$TAG_VERSION does not match package.json version $PKG_VERSION. Use 'npm version $TAG_VERSION' to create the tag."
+              exit 1
+            fi
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
           else
-            VERSION="$(node -p "require('./package.json').version")"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building version $VERSION"
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version $PKG_VERSION"
 
-      - name: Sync package.json version
-        run: npm version "${{ steps.meta.outputs.version }}" --no-git-tag-version --allow-same-version
+      - name: Release notes from CHANGELOG.md
+        run: |
+          if node scripts/changelog-section.mjs "${{ steps.version.outputs.version }}" > release-notes.md; then
+            cat release-notes.md
+          elif [[ "${{ steps.version.outputs.is_release }}" == "true" ]]; then
+            exit 1   # a tagged release must have notes
+          else
+            echo "(no changelog section yet)" > release-notes.md
+          fi
 
-      - name: Type check
-        run: npm run typecheck
+      - name: Detect configured stores
+        id: stores
+        env:
+          CHROME: ${{ secrets.CHROME_EXTENSION_ID }}
+          FIREFOX: ${{ secrets.FIREFOX_JWT_ISSUER }}
+          EDGE: ${{ secrets.EDGE_PRODUCT_ID }}
+        run: |
+          release="${{ steps.version.outputs.is_release }}"
+          for store in chrome firefox edge; do
+            var="${store^^}"
+            if [[ "$release" == "true" && -n "${!var}" ]]; then on=true; else on=false; fi
+            echo "$store=$on" >> "$GITHUB_OUTPUT"
+            echo "publish to $store: $on"
+          done
 
-      - name: Test
-        run: npm test
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
 
-      - name: Build Chrome + Firefox
+      - name: Build
         run: |
           npm run build:chrome
           npm run build:firefox
 
-      - name: Assemble Edge package (Chromium build)
-        run: cp -r dist/chrome dist/edge
+      - name: Validate Firefox package (Mozilla addons-linter)
+        run: npx --yes web-ext@8 lint --source-dir dist/firefox --no-config-discovery
 
-      - name: Zip packages
+      - name: Package
         run: |
-          for target in chrome edge firefox; do
-            (cd "dist/$target" && zip -r -q "../../glimpse-$target.zip" .)
-          done
-          ls -l glimpse-*.zip
+          V="${{ steps.version.outputs.version }}"
+          mkdir -p out
+          (cd dist/chrome && zip -q -r -X "../../out/glimpse-chrome-edge-$V.zip" .)
+          (cd dist/firefox && zip -q -r -X "../../out/glimpse-firefox-$V.zip" .)
+          # AMO requires the source of bundled add-ons; reviewers rebuild it with npm ci + build.
+          git archive --format=zip --prefix="glimpse-$V-source/" -o "out/glimpse-source-$V.zip" HEAD
+          ls -l out
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: glimpse-packages
-          path: glimpse-*.zip
+          name: glimpse-${{ steps.version.outputs.version }}
+          path: |
+            out/*.zip
+            release-notes.md
           if-no-files-found: error
 
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: glimpse-*.zip
-          generate_release_notes: true
-
-  publish-chrome:
+  github-release:
+    name: GitHub Release
     needs: build
+    if: needs.build.outputs.is_release == 'true'
     runs-on: ubuntu-latest
-    if: needs.build.outputs.publish_chrome == 'true'
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: glimpse-packages
+          name: glimpse-${{ needs.build.outputs.version }}
 
-      - name: Upload to Chrome Web Store
-        uses: mnao305/chrome-extension-upload@v5.0.0
+      - uses: softprops/action-gh-release@v3.0.4
         with:
-          file-path: glimpse-chrome.zip
+          name: Glimpse ${{ needs.build.outputs.version }}
+          body_path: release-notes.md
+          files: out/*.zip
+          fail_on_unmatched_files: true
+          make_latest: "true"
+
+  publish-chrome:
+    name: Chrome Web Store
+    needs: build
+    if: needs.build.outputs.chrome == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: glimpse-${{ needs.build.outputs.version }}
+
+      - name: Upload and submit for review
+        uses: mnao305/chrome-extension-upload@v7.0.0
+        with:
+          file-path: out/glimpse-chrome-edge-${{ needs.build.outputs.version }}.zip
           extension-id: ${{ secrets.CHROME_EXTENSION_ID }}
+          publisher-id: ${{ secrets.CHROME_PUBLISHER_ID }}
           client-id: ${{ secrets.CHROME_CLIENT_ID }}
           client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
           refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
           publish: true
 
-  publish-edge:
-    needs: build
-    runs-on: ubuntu-latest
-    if: needs.build.outputs.publish_edge == 'true'
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: glimpse-packages
-
-      - name: Upload to Edge Add-ons
-        uses: wdzeng/edge-addon@v2
-        with:
-          product-id: ${{ secrets.EDGE_PRODUCT_ID }}
-          zip-path: glimpse-edge.zip
-          client-id: ${{ secrets.EDGE_CLIENT_ID }}
-          api-key: ${{ secrets.EDGE_API_KEY }}
-
   publish-firefox:
+    name: Firefox Add-ons
     needs: build
+    if: needs.build.outputs.firefox == 'true'
     runs-on: ubuntu-latest
-    if: needs.build.outputs.publish_firefox == 'true'
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+
       - uses: actions/download-artifact@v4
         with:
-          name: glimpse-packages
+          name: glimpse-${{ needs.build.outputs.version }}
 
-      - name: Sign & upload to Firefox AMO
-        uses: wdzeng/firefox-addon@v1
+      - name: Reviewer notes
+        id: notes
+        run: |
+          {
+            echo "text<<GLIMPSE_NOTES_EOF"
+            cat .github/amo-reviewer-notes.txt
+            echo "GLIMPSE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload, with source code, for signing and review
+        uses: wdzeng/firefox-addon@v1.2.1
         with:
           addon-guid: glimpse@merfanian.github.io
-          xpi-path: glimpse-firefox.zip
+          xpi-path: out/glimpse-firefox-${{ needs.build.outputs.version }}.zip
+          source-file-path: out/glimpse-source-${{ needs.build.outputs.version }}.zip
+          approval-notes: ${{ steps.notes.outputs.text }}
+          license: MIT
           jwt-issuer: ${{ secrets.FIREFOX_JWT_ISSUER }}
           jwt-secret: ${{ secrets.FIREFOX_JWT_SECRET }}
+
+  publish-edge:
+    name: Edge Add-ons
+    needs: build
+    if: needs.build.outputs.edge == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: glimpse-${{ needs.build.outputs.version }}
+
+      - name: Upload and submit for certification
+        uses: wdzeng/edge-addon@v2.1.1
+        with:
+          product-id: ${{ secrets.EDGE_PRODUCT_ID }}
+          zip-path: out/glimpse-chrome-edge-${{ needs.build.outputs.version }}.zip
+          client-id: ${{ secrets.EDGE_CLIENT_ID }}
+          api-key: ${{ secrets.EDGE_API_KEY }}
