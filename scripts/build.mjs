@@ -95,6 +95,7 @@ function buildManifest() {
     name: "Glimpse",
     version: pkg.version,
     description: pkg.description,
+    homepage_url: "https://merfanian.github.io/glimpse/",
     icons: {
       16: "icons/icon-16.png",
       32: "icons/icon-32.png",

@@ -20,6 +20,8 @@ export interface PaperCandidate {
   doi?: string;
   arxivId?: string;
   abstract?: string;
+  /** One-sentence AI summary (Semantic Scholar TLDR), when available. */
+  tldr?: string;
   /** Direct URL to an (ideally open-access) PDF, if known. */
   pdfUrl?: string;
   /** Every known PDF URL, best first (pdfUrl is pdfUrls[0]). Tried in order on fetch. */

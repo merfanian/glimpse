@@ -6,7 +6,8 @@
 
 <p align="center">
   <b>Hover a citation. See the paper. Keep reading.</b><br>
-  Preview the papers a research paper cites — abstract or full PDF — without losing your place.
+  Preview the papers a research paper cites — abstract, TL;DR or full PDF — without losing your place.<br>
+  <a href="https://merfanian.github.io/glimpse/"><b>merfanian.github.io/glimpse</b></a>
 </p>
 
 <p align="center">
@@ -46,8 +47,8 @@ in a floating panel.
     </td>
     <td width="33%" valign="top">
       <img src="docs/images/icons/pdf.svg" width="44" alt=""><br>
-      <b>Abstract or full PDF</b><br>
-      The abstract appears instantly; one click renders the open-access PDF, page by page.
+      <b>Abstract, TL;DR or full PDF</b><br>
+      A one-line summary and the abstract appear instantly; one click renders the open-access PDF. <b>Cite</b> copies BibTeX.
     </td>
   </tr>
   <tr>
@@ -81,6 +82,12 @@ in a floating panel.
     <td align="center"><sub><b>The full open-access PDF</b>, rendered page by page</sub></td>
   </tr>
   <tr>
+    <td colspan="2"><img src="docs/images/tldr-and-cite.jpg" alt="TL;DR summary and the Cite menu"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><sub><b>New in 1.3:</b> a one-line <b>TL;DR</b> of the cited paper, and <b>Cite</b> to copy BibTeX or a formatted reference</sub></td>
+  </tr>
+  <tr>
     <td><img src="docs/images/dark-mode.jpg" alt="Glimpse in dark mode"></td>
     <td><img src="docs/images/open-pdfs-in-glimpse.jpg" alt="Open in Glimpse suggestion over the browser's PDF viewer"></td>
   </tr>
@@ -108,7 +115,8 @@ from the [latest release](https://github.com/merfanian/glimpse/releases/latest) 
    browser's own viewer (e.g. `arxiv.org/pdf/…`), accept the *Open in Glimpse* suggestion,
    or click the Glimpse toolbar button → **Open this PDF in Glimpse**.
 2. **Hover a citation** and click **Preview**.
-3. **Read** the abstract, or switch to **Full PDF**. *Open* takes you to the paper's page.
+3. **Read** the TL;DR and abstract, or switch to **Full PDF**. **Cite** copies BibTeX or a
+   formatted reference; *Open* takes you to the paper's page.
 
 **Tips:** drag the panel by its header, resize it from either bottom corner, and press
 <kbd>Esc</kbd> to close it. If the match isn't right, pick one of the *other matches*.

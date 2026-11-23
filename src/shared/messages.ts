@@ -3,6 +3,7 @@ import type { LookupResult, ParsedReference, FetchedPdf } from "./types";
 
 export type Message =
   | LookupRequest
+  | LookupDetailsRequest
   | FetchPdfRequest
   | ActivateRequest
   | NativePdfRequest
@@ -11,6 +12,12 @@ export type Message =
 
 export interface LookupRequest {
   type: "lookup";
+  reference: ParsedReference;
+}
+
+/** Same reference again, answered once every source has responded (late TL;DRs etc.). */
+export interface LookupDetailsRequest {
+  type: "lookupDetails";
   reference: ParsedReference;
 }
 

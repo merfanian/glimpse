@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Glimpse — preview cited papers without leaving the PDF</title>
+  <meta name="description" content="Hover a citation in a research paper and preview the cited paper — abstract, TL;DR or full PDF — without losing your place. Works in Overleaf and any PDF, on Chrome, Edge and Firefox.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="icon" type="image/png" href="assets/images/logo.png">
+  <link rel="canonical" href="https://merfanian.github.io/glimpse/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Glimpse — preview cited papers without leaving the PDF">
+  <meta property="og:description" content="Hover a citation. See the paper. Keep reading. Free, open source, private.">
+  <meta property="og:url" content="https://merfanian.github.io/glimpse/">
+  <meta property="og:image" content="https://merfanian.github.io/glimpse/assets/images/abstract-preview.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="main.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top" aria-label="Glimpse home">
+        <img src="assets/images/logo.png" width="32" height="32" alt="">
+        <span>Glimpse</span>
+      </a>
+      <nav aria-label="Main">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#whats-new">What's new</a>
+        <a href="#faq">FAQ</a>
+        <a class="nav-gh" href="https://github.com/merfanian/glimpse" aria-label="Glimpse on GitHub">
+          <svg width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        </a>
+        <a class="btn btn-sm btn-primary" href="#install">Install</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ── Hero ─────────────────────────────────────────────── -->
+    <section class="hero" id="top">
+      <div class="wrap hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="pill-new">New in 1.3</span> TL;DR summaries &amp; one-click citations</p>
+          <h1>Hover a citation.<br><span class="grad">See the paper.</span><br>Keep reading.</h1>
+          <p class="lede">Glimpse previews the papers a paper cites — abstract, TL;DR or the full PDF — in a panel right beside the sentence that cites it. In Overleaf and any PDF, on Chrome, Edge and Firefox.</p>
+          <div class="cta" id="install-hero">
+            <a class="btn btn-primary btn-lg" data-store="auto" href="#install">Install Glimpse</a>
+            <a class="btn btn-ghost btn-lg" href="#how">See how it works</a>
+          </div>
+          <p class="trust">Free &amp; open source · No account · No tracking</p>
+        </div>
+        <div class="hero-demo">
+          <div class="window">
+            <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+            <img src="assets/images/demo.gif" width="880" height="528" alt="Hovering a citation in a PDF, clicking Preview, and reading the cited paper's abstract and full PDF in a side panel">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Logos / where ─────────────────────────────────────── -->
+    <section class="strip" aria-label="Where Glimpse works">
+      <div class="wrap strip-inner">
+        <span>Works in</span>
+        <b>Overleaf</b><i aria-hidden="true">·</i>
+        <b>arXiv PDFs</b><i aria-hidden="true">·</i>
+        <b>pdf.js viewers</b><i aria-hidden="true">·</i>
+        <b>local PDF files</b>
+        <span class="strip-sep">on</span>
+        <b>Chrome</b><i aria-hidden="true">·</i><b>Edge</b><i aria-hidden="true">·</i><b>Firefox</b>
+      </div>
+    </section>
+
+    <!-- ── Features ─────────────────────────────────────────── -->
+    <section class="section" id="features">
+      <div class="wrap">
+        <h2 class="section-title">Stay in the paper you're reading</h2>
+        <p class="section-sub">No more jumping to the bibliography, copying a title into a search engine and losing your place.</p>
+        <div class="grid">
+          <article class="card">
+            <img src="assets/images/icons/hover.svg" width="48" height="48" alt="">
+            <h3>Preview in place</h3>
+            <p>Hover <code>[12]</code> or <code>(Vaswani et al., 2017)</code> and click <em>Preview</em>. The cited paper opens beside your text.</p>
+          </article>
+          <article class="card">
+            <img src="assets/images/icons/search.svg" width="48" height="48" alt="">
+            <h3>Finds the right paper</h3>
+            <p>Reads the paper's own bibliography, then checks Semantic Scholar, arXiv, Crossref and OpenAlex — with a confidence score.</p>
+          </article>
+          <article class="card">
+            <img src="assets/images/icons/pdf.svg" width="48" height="48" alt="">
+            <h3>Abstract, TL;DR or full PDF</h3>
+            <p>A one-line summary and the abstract appear instantly; one click renders the open-access PDF, page by page.</p>
+          </article>
+          <article class="card">
+            <img src="assets/images/icons/browser.svg" width="48" height="48" alt="">
+            <h3>Works where you read and write</h3>
+            <p>Overleaf's live preview, pdf.js-based sites, and any PDF you open — Glimpse offers to open it where previews work.</p>
+          </article>
+          <article class="card">
+            <img src="assets/images/icons/moon.svg" width="48" height="48" alt="">
+            <h3>Built for long sessions</h3>
+            <p>Drag and resize the panel, <kbd>Esc</kbd> to close, light and dark mode — and it remembers where you put it.</p>
+          </article>
+          <article class="card">
+            <img src="assets/images/icons/shield.svg" width="48" height="48" alt="">
+            <h3>Private by design</h3>
+            <p>No account, no servers, no tracking. Only the citation you choose to preview is looked up — straight from your browser.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── What's new ───────────────────────────────────────── -->
+    <section class="section section-tint" id="whats-new">
+      <div class="wrap split">
+        <div class="split-copy">
+          <p class="eyebrow"><span class="pill-new">New</span> Version 1.3</p>
+          <h2 class="section-title left">Understand a paper at a glance — and cite it in one click</h2>
+          <ul class="checks">
+            <li><b>TL;DR summaries.</b> A one-sentence summary of the cited paper, from Semantic Scholar, right above its abstract.</li>
+            <li><b>Cite button.</b> Copy a ready-to-paste BibTeX entry for LaTeX and Overleaf, or a formatted text reference.</li>
+            <li><b>Honest matching.</b> When no paper clearly matches, Glimpse says so and offers possible matches and a Google Scholar search — never a wrong paper.</li>
+          </ul>
+          <p class="muted">Also in recent releases: four lookup sources, much better bibliography reading for ACM, IEEE, ACL and NeurIPS styles, and opening any PDF in Glimpse in one click. <a href="https://github.com/merfanian/glimpse/blob/main/CHANGELOG.md">Full changelog →</a></p>
+        </div>
+        <figure class="shot">
+          <img src="assets/images/tldr-and-cite.jpg" width="1280" height="800" loading="lazy" alt="The Glimpse panel showing a TL;DR summary above the abstract, and the Cite menu with Copy BibTeX and Copy citation">
+        </figure>
+      </div>
+    </section>
+
+    <!-- ── How it works ─────────────────────────────────────── -->
+    <section class="section" id="how">
+      <div class="wrap">
+        <h2 class="section-title">How it works</h2>
+        <p class="section-sub">Most LaTeX papers link every citation to its bibliography entry. Glimpse follows that link.</p>
+        <img class="diagram" src="assets/images/how-it-works.svg" width="1000" height="250" loading="lazy" alt="1. Hover a citation. 2. Glimpse reads its bibliography entry. 3. It looks the paper up in Semantic Scholar, arXiv, Crossref and OpenAlex. 4. It previews the paper in place.">
+        <div class="gallery">
+          <figure><img src="assets/images/abstract-preview.jpg" width="1280" height="800" loading="lazy" alt="Abstract preview with authors, venue and a match-confidence badge"><figcaption>Abstract, authors and venue, with a match-confidence badge</figcaption></figure>
+          <figure><img src="assets/images/full-pdf-preview.jpg" width="1280" height="800" loading="lazy" alt="The full PDF of a cited paper rendered inside the panel"><figcaption>The full open-access PDF, page by page</figcaption></figure>
+          <figure><img src="assets/images/dark-mode.jpg" width="1280" height="800" loading="lazy" alt="Glimpse in dark mode"><figcaption>Dark mode, following your system</figcaption></figure>
+          <figure><img src="assets/images/open-pdfs-in-glimpse.jpg" width="1280" height="800" loading="lazy" alt="Open in Glimpse suggestion over the browser's PDF viewer"><figcaption>One click from the browser's PDF viewer</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Compatibility ────────────────────────────────────── -->
+    <section class="section section-tint" id="where">
+      <div class="wrap">
+        <h2 class="section-title">Works where your papers are</h2>
+        <div class="table-wrap">
+          <table class="compat">
+            <thead><tr><th></th><th>Chrome</th><th>Edge</th><th>Firefox</th></tr></thead>
+            <tbody>
+              <tr><th>Overleaf's PDF preview</th><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+              <tr><th>Websites using pdf.js</th><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+              <tr><th>PDFs in the browser's own viewer</th><td class="yes">One click</td><td class="yes">One click</td><td class="yes">One click</td></tr>
+              <tr><th>PDF files on your computer</th><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Pick or drop</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted center">Needs a PDF with citation links (almost all LaTeX and arXiv papers). The full-PDF preview needs an open-access copy.</p>
+      </div>
+    </section>
+
+    <!-- ── Install ──────────────────────────────────────────── -->
+    <section class="section" id="install">
+      <div class="wrap">
+        <h2 class="section-title">Install Glimpse</h2>
+        <p class="section-sub">Free and open source. Pick your browser:</p>
+        <div class="stores">
+          <a class="store" id="store-firefox" href="https://addons.mozilla.org/en-US/firefox/addon/glimpse-citation-preview-tool/">
+            <span class="store-logo store-firefox" aria-hidden="true"></span>
+            <span class="store-text"><b>Firefox</b><small>Get it on Firefox Add-ons</small></span>
+            <span class="store-status live">Available</span>
+          </a>
+          <a class="store" id="store-chrome" href="https://github.com/merfanian/glimpse/releases/latest" data-store-url="">
+            <span class="store-logo store-chrome" aria-hidden="true"></span>
+            <span class="store-text"><b>Chrome</b><small>Chrome Web Store listing in review — download from GitHub for now</small></span>
+            <span class="store-status soon">Soon</span>
+          </a>
+          <a class="store" id="store-edge" href="https://github.com/merfanian/glimpse/releases/latest" data-store-url="">
+            <span class="store-logo store-edge" aria-hidden="true"></span>
+            <span class="store-text"><b>Edge</b><small>Edge Add-ons listing in review — download from GitHub for now</small></span>
+            <span class="store-status soon">Soon</span>
+          </a>
+        </div>
+        <details class="manual">
+          <summary>Installing from the GitHub download (Chrome / Edge)</summary>
+          <ol>
+            <li>Download <code>glimpse-chrome-edge-&lt;version&gt;.zip</code> from the <a href="https://github.com/merfanian/glimpse/releases/latest">latest release</a> and unzip it.</li>
+            <li>Open <code>chrome://extensions</code> (or <code>edge://extensions</code>) and turn on <b>Developer mode</b>.</li>
+            <li>Click <b>Load unpacked</b> and select the unzipped folder.</li>
+          </ol>
+        </details>
+
+        <h3 class="subhead">Then, in three steps</h3>
+        <ol class="steps">
+          <li><span>1</span><div><b>Open a paper</b><p>In Overleaf or any PDF. For a PDF in the browser's own viewer, accept the <em>Open in Glimpse</em> suggestion.</p></div></li>
+          <li><span>2</span><div><b>Hover a citation</b><p>A <em>Preview</em> button appears next to it. Click it.</p></div></li>
+          <li><span>3</span><div><b>Read, cite, keep going</b><p>TL;DR and abstract instantly, <em>Full PDF</em> in one click, <em>Cite</em> to copy BibTeX.</p></div></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ── Privacy ──────────────────────────────────────────── -->
+    <section class="section section-tint privacy">
+      <div class="wrap privacy-inner">
+        <img src="assets/images/icons/shield.svg" width="64" height="64" alt="">
+        <div>
+          <h2 class="section-title left">Your reading stays yours</h2>
+          <p>Glimpse has no servers, accounts, analytics or tracking. When you preview a citation, only that one bibliography entry is sent — directly from your browser — to public scholarly databases (Semantic Scholar, arXiv, Crossref, OpenAlex). <a href="https://github.com/merfanian/glimpse/blob/main/PRIVACY.md">Read the privacy policy →</a></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── FAQ ──────────────────────────────────────────────── -->
+    <section class="section" id="faq">
+      <div class="wrap narrow">
+        <h2 class="section-title">Questions</h2>
+        <details class="faq"><summary>Why doesn't Glimpse work inside Chrome's or Firefox's own PDF viewer?</summary>
+          <p>Browsers don't let extensions run inside their built-in PDF viewers. So when you open a PDF, Glimpse offers to open it in its own viewer, where previews work. Choose <em>Always</em> in the toolbar popup to skip the question.</p></details>
+        <details class="faq"><summary>Which papers work?</summary>
+          <p>Any PDF whose citations are links to the bibliography — nearly every paper written in LaTeX, including arXiv papers. Glimpse handles numbered and author–year styles, two-column layouts and review copies with line numbers.</p></details>
+        <details class="faq"><summary>Why do some papers show only the abstract?</summary>
+          <p>The full-PDF preview needs an open-access copy (for example on arXiv). Otherwise Glimpse shows the abstract and an <em>Open</em> link to the paper's page.</p></details>
+        <details class="faq"><summary>What if Glimpse picks the wrong paper?</summary>
+          <p>Every match shows a confidence score, and you can switch to <em>other matches</em>. When nothing matches clearly, Glimpse says so and offers possible matches and a Google Scholar search instead of guessing.</p></details>
+        <details class="faq"><summary>Does it cost anything?</summary>
+          <p>No. Glimpse is free and open source under the MIT license.</p></details>
+        <details class="faq"><summary>How do I report a bug or ask for a feature?</summary>
+          <p><a href="https://github.com/merfanian/glimpse/issues">Open an issue on GitHub</a>. A link to the PDF you were reading helps a lot.</p></details>
+      </div>
+    </section>
+
+    <!-- ── Final CTA ────────────────────────────────────────── -->
+    <section class="final">
+      <div class="wrap final-inner">
+        <img src="assets/images/logo.png" width="72" height="72" alt="">
+        <h2>Read papers the way you'd like to</h2>
+        <a class="btn btn-light btn-lg" data-store="auto" href="#install">Install Glimpse — it's free</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="brand"><img src="assets/images/logo.png" width="24" height="24" alt=""><span>Glimpse</span></div>
+      <nav aria-label="Footer">
+        <a href="https://github.com/merfanian/glimpse">GitHub</a>
+        <a href="https://github.com/merfanian/glimpse/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/merfanian/glimpse/blob/main/PRIVACY.md">Privacy</a>
+        <a href="https://github.com/merfanian/glimpse/issues">Support</a>
+      </nav>
+      <p class="muted">MIT licensed · Made for people who read a lot of papers</p>
+    </div>
+  </footer>
+</body>
+</html>

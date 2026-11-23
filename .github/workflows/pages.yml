@@ -1,0 +1,59 @@
+name: Website
+
+# Publishes the Glimpse website (website/ + docs/images) to GitHub Pages:
+# https://merfanian.github.io/glimpse/
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "docs/images/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site/assets
+          cp -r website/. _site/
+          cp -r docs/images _site/assets/images
+          touch _site/.nojekyll
+          find _site -type f | sort
+
+      - name: Check that every local link and image exists
+        run: |
+          missing=0
+          for ref in $(grep -oE '(src|href)="[^"#:]+"' _site/index.html | sed -E 's/^(src|href)="//; s/"$//' | sort -u); do
+            if [[ ! -e "_site/$ref" ]]; then echo "::error::index.html references missing file: $ref"; missing=1; fi
+          done
+          exit $missing
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
