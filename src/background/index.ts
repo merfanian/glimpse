@@ -85,14 +85,20 @@ async function settled(p: Promise<SourceResult>, label: string): Promise<PaperCa
 /**
  * Run source queries in parallel, re-ranking as each one lands. Resolves early once a
  * candidate is GOOD_ENOUGH (so one slow / rate-limited source doesn't hold up the panel),
- * otherwise when every source has answered.
+ * otherwise when every source has answered. Every task's completion is also recorded in
+ * `settledTasks`, so late answers (e.g. Semantic Scholar's TL;DR) can be delivered later.
  */
-function collect(ref: ParsedReference, pool: PaperCandidate[], tasks: Array<[string, () => Promise<SourceResult>]>): Promise<void> {
+function collect(
+  ref: ParsedReference,
+  pool: PaperCandidate[],
+  tasks: Array<[string, () => Promise<SourceResult>]>,
+  settledTasks: Promise<unknown>[],
+): Promise<void> {
   if (tasks.length === 0) return Promise.resolve();
   return new Promise((resolve) => {
     let pending = tasks.length;
     for (const [label, run] of tasks) {
-      void settled(run(), label).then((found) => {
+      const done = settled(run(), label).then((found) => {
         pool.push(...found);
         pending--;
         const best = rank(ref, pool).candidates[0];
@@ -100,14 +106,30 @@ function collect(ref: ParsedReference, pool: PaperCandidate[], tasks: Array<[str
           resolve();
         }
       });
+      settledTasks.push(done);
     }
   });
 }
 
-async function doLookup(ref: ParsedReference, settings: Settings): Promise<LookupResult> {
+function finalize(ref: ParsedReference, pool: PaperCandidate[]): LookupResult {
+  const candidates = rank(ref, pool)
+    .candidates.filter((c, i) => i === 0 || c.confidence >= MIN_ALTERNATIVE)
+    .slice(0, MAX_CANDIDATES);
+  return { reference: ref, candidates, bestIndex: candidates.length ? 0 : -1 };
+}
+
+interface LookupRun {
+  /** Answer as soon as a confident match is known. */
+  result: LookupResult;
+  /** The same lookup once every source has answered (adds late details like TL;DRs). */
+  complete: Promise<LookupResult>;
+}
+
+async function doLookup(ref: ParsedReference, settings: Settings): Promise<LookupRun> {
   const src = settings.sources;
   const email = settings.contactEmail.trim();
   const pool: PaperCandidate[] = [];
+  const settledTasks: Promise<unknown>[] = [];
 
   // Stage 1 — identifiers and the precise title matchers.
   const stage1: Array<[string, () => Promise<SourceResult>]> = [];
@@ -125,7 +147,7 @@ async function doLookup(ref: ParsedReference, settings: Settings): Promise<Looku
   } else if (src.semanticScholar) {
     stage1.push(["s2:search", () => s2Search(ref)]);
   }
-  await collect(ref, pool, stage1);
+  await collect(ref, pool, stage1, settledTasks);
 
   // Stage 2 — broad bibliographic search when nothing convincing was found yet.
   let best = rank(ref, pool).candidates[0];
@@ -136,7 +158,7 @@ async function doLookup(ref: ParsedReference, settings: Settings): Promise<Looku
     if (!ref.title && src.semanticScholar && !stage1.some(([l]) => l === "s2:search")) {
       stage2.push(["s2:search", () => s2Search(ref)]);
     }
-    await collect(ref, pool, stage2);
+    await collect(ref, pool, stage2, settledTasks);
     best = rank(ref, pool).candidates[0];
   }
 
@@ -148,16 +170,18 @@ async function doLookup(ref: ParsedReference, settings: Settings): Promise<Looku
     // Enrichment results describe the same paper: give them the best's confidence so they
     // merge into it instead of ranking separately.
     const extra: PaperCandidate[] = [];
-    await collect(ref, extra, enrich);
+    await collect(ref, extra, enrich, []);
     for (const c of extra) pool.push({ ...c, title: best.title });
   }
 
-  const ranked = rank(ref, pool);
-  const candidates = ranked.candidates
-    .filter((c, i) => i === 0 || c.confidence >= MIN_ALTERNATIVE)
-    .slice(0, MAX_CANDIDATES);
-  return { reference: ref, candidates, bestIndex: candidates.length ? 0 : -1 };
+  return {
+    result: finalize(ref, pool),
+    complete: Promise.all(settledTasks).then(() => finalize(ref, pool)),
+  };
 }
+
+/** Complete results (all sources answered), kept briefly for the panel's follow-up request. */
+const completeLookups = new TtlCache<Promise<LookupResult>>(10 * 60 * 1000);
 
 async function lookup(req: { reference: ParsedReference }): Promise<LookupResult> {
   const key = cacheKey(req.reference);
@@ -168,13 +192,26 @@ async function lookup(req: { reference: ParsedReference }): Promise<LookupResult
 
   const p = (async () => {
     const settings = await getSettings();
-    const result = await doLookup(req.reference, settings);
+    const { result, complete } = await doLookup(req.reference, settings);
     // Don't cache misses: they are often transient (rate limits, network blips).
     if (result.candidates.length > 0) lookupCache.set(key, result);
+    completeLookups.set(key, complete);
+    // Once every source has answered, cache the fuller result for later previews.
+    void complete.then((full) => {
+      if (full.candidates.length > 0) lookupCache.set(key, full);
+    });
     return result;
   })().finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
+}
+
+/** The complete result for a reference that was looked up recently (else the cached one). */
+async function lookupDetails(req: { reference: ParsedReference }): Promise<LookupResult> {
+  const key = cacheKey(req.reference);
+  const complete = completeLookups.get(key);
+  if (complete) return complete;
+  return lookup(req);
 }
 
 // ── Messaging ───────────────────────────────────────────────────────────────
@@ -186,6 +223,12 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
   switch (message?.type) {
     case "lookup":
       lookup(message)
+        .then((result) => sendResponse({ ok: true, result }))
+        .catch((err) => sendResponse({ ok: false, error: errorText(err) }));
+      return true;
+
+    case "lookupDetails":
+      lookupDetails(message)
         .then((result) => sendResponse({ ok: true, result }))
         .catch((err) => sendResponse({ ok: false, error: errorText(err) }));
       return true;

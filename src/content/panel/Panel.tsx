@@ -2,11 +2,18 @@
 import type { ComponentChildren } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { sendMessage } from "@shared/messages";
-import type { LookupRequest, LookupResponse, FetchPdfRequest, FetchPdfResponse } from "@shared/messages";
+import type {
+  LookupRequest,
+  LookupDetailsRequest,
+  LookupResponse,
+  FetchPdfRequest,
+  FetchPdfResponse,
+} from "@shared/messages";
 import type { ParsedReference, PaperCandidate, LookupResult } from "@shared/types";
 import { getSettings } from "@shared/settings";
 import { base64ToUint8Array } from "../pdfReference";
 import { openPdfBackend, PdfPagesView } from "./pdfView";
+import { toBibtex, toPlainCitation } from "@shared/cite";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Geometry (position + size), remembered across panels and page loads
@@ -237,6 +244,81 @@ function scholarUrl(reference: ParsedReference, candidate?: PaperCandidate): str
   return `https://scholar.google.com/scholar?q=${encodeURIComponent(q)}`;
 }
 
+/** Copy text to the clipboard; falls back to execCommand on non-secure (http) pages. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    /* not a secure context, or no permission */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none;";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function CiteMenu({ candidate }: { candidate: PaperCandidate }) {
+  const [open, setOpen] = useState(false);
+  const [done, setDone] = useState<"" | "ok" | "fail">("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: Event) => {
+      if (ref.current && !e.composedPath().includes(ref.current)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [open]);
+
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setDone(""), 1800);
+    return () => clearTimeout(t);
+  }, [done]);
+
+  const copy = async (text: string) => {
+    setOpen(false);
+    setDone((await copyText(text)) ? "ok" : "fail");
+  };
+
+  return (
+    <div class="rp-cite" ref={ref}>
+      <button
+        class="rp-btn rp-btn-secondary"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Copy a citation for this paper"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {done === "ok" ? "Copied ✓" : done === "fail" ? "Copy failed" : "Cite"}
+      </button>
+      {open && (
+        <div class="rp-cite-menu" role="menu">
+          <button role="menuitem" class="rp-cite-item" onClick={() => void copy(toBibtex(candidate))}>
+            <span class="rp-cite-item-title">Copy BibTeX</span>
+            <span class="rp-cite-item-desc">For LaTeX / Overleaf</span>
+          </button>
+          <button role="menuitem" class="rp-cite-item" onClick={() => void copy(toPlainCitation(candidate))}>
+            <span class="rp-cite-item-title">Copy citation</span>
+            <span class="rp-cite-item-desc">Formatted text reference</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExternalIcon() {
   return (
     <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" class="rp-ext-icon">
@@ -288,6 +370,39 @@ type PdfState =
   | { status: "loading" }
   | { status: "error"; error: string }
   | { status: "ready"; bytes: Uint8Array; url: string };
+
+function identity(c: PaperCandidate): string[] {
+  const keys: string[] = [];
+  if (c.doi) keys.push(`doi:${c.doi.toLowerCase()}`);
+  if (c.arxivId) keys.push(`arxiv:${c.arxivId.replace(/v\d+$/, "").toLowerCase()}`);
+  keys.push(`title:${c.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()}`);
+  return keys;
+}
+
+/**
+ * Patch late details (TL;DR, abstract, PDF links) into the candidates already on screen,
+ * without reordering them or changing which one is selected.
+ */
+function mergeDetails(shown: LookupResult, full: LookupResult): LookupResult {
+  const byKey = new Map<string, PaperCandidate>();
+  for (const c of full.candidates) for (const k of identity(c)) if (!byKey.has(k)) byKey.set(k, c);
+  let changed = false;
+  const candidates = shown.candidates.map((c) => {
+    const match = identity(c).map((k) => byKey.get(k)).find(Boolean);
+    if (!match) return c;
+    const patch: Partial<PaperCandidate> = {};
+    if (!c.tldr && match.tldr) patch.tldr = match.tldr;
+    if (!c.abstract && match.abstract) patch.abstract = match.abstract;
+    if (!c.pdfUrl && match.pdfUrl) {
+      patch.pdfUrl = match.pdfUrl;
+      patch.pdfUrls = match.pdfUrls;
+    }
+    if (Object.keys(patch).length === 0) return c;
+    changed = true;
+    return { ...c, ...patch };
+  });
+  return changed ? { ...shown, candidates } : shown;
+}
 
 /** Below this, the best candidate is offered as a "possible match" rather than shown. */
 const MIN_SHOWN_CONFIDENCE = 0.45;
@@ -353,6 +468,18 @@ export function ReferenceView({ reference, onClose }: { reference: ParsedReferen
       const top = resp.result.candidates[best];
       if (settings.defaultView === "pdf" && top && top.confidence >= MIN_SHOWN_CONFIDENCE && pdfUrlsOf(top).length) {
         setView("pdf");
+      }
+      // The first answer arrives as soon as one source is confident; slower sources (notably
+      // Semantic Scholar, the only one with TL;DRs) may still add details. Fetch them.
+      if (resp.result.candidates.length === 0 || resp.result.candidates.some((c) => !c.tldr)) {
+        void sendMessage<LookupDetailsRequest, LookupResponse>({ type: "lookupDetails", reference }).then((more) => {
+          if (cancelled || !more.ok) return;
+          setLookup((cur) => {
+            if (cur.status !== "done") return cur;
+            if (cur.result.candidates.length === 0) return { status: "done", result: more.result };
+            return { status: "done", result: mergeDetails(cur.result, more.result) };
+          });
+        });
       }
     });
     return () => {
@@ -521,6 +648,14 @@ export function ReferenceView({ reference, onClose }: { reference: ParsedReferen
                     )}
                   </div>
                 )}
+                {candidate.tldr && (
+                  <div class="rp-tldr">
+                    <p class="rp-tldr-label">
+                      TL;DR <span class="rp-tldr-source">· Semantic Scholar</span>
+                    </p>
+                    <p class="rp-tldr-text">{candidate.tldr}</p>
+                  </div>
+                )}
                 <p class="rp-section-label">Abstract</p>
                 {candidate.abstract ? (
                   <p class="rp-abstract-text">{candidate.abstract}</p>
@@ -571,6 +706,7 @@ export function ReferenceView({ reference, onClose }: { reference: ParsedReferen
               </span>
             )}
             <span class="rp-spacer" />
+            <CiteMenu candidate={candidate} />
             {candidate.url && (
               <a class="rp-btn rp-btn-secondary" href={candidate.url} target="_blank" rel="noopener noreferrer">
                 Open <ExternalIcon />

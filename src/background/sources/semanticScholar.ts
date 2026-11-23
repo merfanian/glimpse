@@ -3,7 +3,7 @@ import type { PaperCandidate, ParsedReference } from "@shared/types";
 import { apiFetch } from "./http";
 
 const BASE = "https://api.semanticscholar.org/graph/v1/paper";
-const FIELDS = "title,authors,year,abstract,openAccessPdf,externalIds,venue";
+const FIELDS = "title,authors,year,abstract,tldr,openAccessPdf,externalIds,venue";
 
 interface S2Paper {
   paperId?: string;
@@ -11,6 +11,7 @@ interface S2Paper {
   authors?: { name: string }[];
   year?: number;
   abstract?: string;
+  tldr?: { text?: string } | null;
   openAccessPdf?: { url?: string } | null;
   externalIds?: { DOI?: string; ArXiv?: string } | null;
   venue?: string;
@@ -28,6 +29,7 @@ function toCandidate(p: S2Paper, confidence = 0): PaperCandidate | null {
     doi: p.externalIds?.DOI,
     arxivId: p.externalIds?.ArXiv,
     abstract: p.abstract ?? undefined,
+    tldr: p.tldr?.text || undefined,
     pdfUrl,
     url: p.externalIds?.DOI
       ? `https://doi.org/${p.externalIds.DOI}`

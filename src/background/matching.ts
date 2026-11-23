@@ -216,6 +216,7 @@ function mergeGroup(group: PaperCandidate[]): PaperCandidate {
     arxivId: pick("arxivId"),
     // The longest abstract is usually the complete one (Crossref often truncates).
     abstract: abstracts.sort((a, b) => b.length - a.length)[0],
+    tldr: pick("tldr"),
     venue: pick("venue"),
     year: pick("year"),
     url: pick("url"),

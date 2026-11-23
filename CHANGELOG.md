@@ -3,6 +3,19 @@
 All notable changes to Glimpse. The release workflow publishes the section matching each
 version tag as that release's notes, so add a section **before** bumping the version.
 
+## [1.3.0] - 2026-11-24
+
+### New
+
+- **TL;DR summaries.** A one-sentence summary of the cited paper, from Semantic Scholar,
+  appears above its abstract. It arrives a moment after the panel opens, so the preview
+  stays fast.
+- **Cite button.** Copy a ready-to-paste BibTeX entry (for LaTeX and Overleaf) or a
+  formatted text reference for the paper you are previewing. Generated on your computer,
+  with nothing sent anywhere.
+- **Website.** Features, install links and what's new at
+  https://merfanian.github.io/glimpse/.
+
 ## [1.2.0] - 2026-11-23
 
 A big reliability and design update: previews now work across Chrome, Edge and Firefox, find
