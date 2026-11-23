@@ -289,6 +289,9 @@ type PdfState =
   | { status: "error"; error: string }
   | { status: "ready"; bytes: Uint8Array; url: string };
 
+/** Below this, the best candidate is offered as a "possible match" rather than shown. */
+const MIN_SHOWN_CONFIDENCE = 0.45;
+
 function confidenceLabel(c: number): { text: string; cls: string } {
   const pct = Math.round(c * 100);
   if (c >= 0.85) return { text: `Strong match · ${pct}%`, cls: "rp-conf-high" };
@@ -320,6 +323,8 @@ export function ReferenceView({ reference, onClose }: { reference: ParsedReferen
   const [showAlts, setShowAlts] = useState(false);
   const [pdf, setPdf] = useState<PdfState>({ status: "idle" });
   const [attempt, setAttempt] = useState(0);
+  /** The user explicitly chose a low-confidence candidate from "Possible matches". */
+  const [picked, setPicked] = useState(false);
   const [pageInfo, setPageInfo] = useState<{ page: number; total: number } | null>(null);
   // Finished PDF downloads per candidate (by URL list), so switching views/candidates is instant.
   const pdfCache = useRef(new Map<string, Promise<PdfState>>());
@@ -344,7 +349,11 @@ export function ReferenceView({ reference, onClose }: { reference: ParsedReferen
       const best = Math.max(0, resp.result.bestIndex);
       setLookup({ status: "done", result: resp.result });
       setSelected(best);
-      if (settings.defaultView === "pdf" && pdfUrlsOf(resp.result.candidates[best]).length) setView("pdf");
+      setPicked(false);
+      const top = resp.result.candidates[best];
+      if (settings.defaultView === "pdf" && top && top.confidence >= MIN_SHOWN_CONFIDENCE && pdfUrlsOf(top).length) {
+        setView("pdf");
+      }
     });
     return () => {
       cancelled = true;
@@ -352,7 +361,10 @@ export function ReferenceView({ reference, onClose }: { reference: ParsedReferen
   }, [reference, attempt]);
 
   const candidates = lookup.status === "done" ? lookup.result.candidates : [];
-  const candidate: PaperCandidate | undefined = candidates[selected];
+  const selectedCandidate: PaperCandidate | undefined = candidates[selected];
+  // A weak guess is not presented as "the" paper; it's offered under "Possible matches".
+  const candidate: PaperCandidate | undefined =
+    selectedCandidate && (selectedCandidate.confidence >= MIN_SHOWN_CONFIDENCE || picked) ? selectedCandidate : undefined;
   const urls = pdfUrlsOf(candidate);
   const pdfKey = urls.join("\n");
 
@@ -425,13 +437,35 @@ export function ReferenceView({ reference, onClose }: { reference: ParsedReferen
         {lookup.status === "done" && !candidate && (
           <div class="rp-scroll">
             <div class="rp-message">
-              <p class="rp-message-title">No matching paper found online</p>
+              <p class="rp-message-title">No confident match found</p>
               <p class="rp-message-detail">
-                Crossref, arXiv, Semantic Scholar and OpenAlex didn't return a confident match.
-                Here is the entry from this paper's bibliography:
+                Semantic Scholar, arXiv, Crossref and OpenAlex didn't return a paper that clearly
+                matches this reference. It may be a report, book or web page.
               </p>
             </div>
             <ReferenceBox reference={reference} open />
+            {candidates.length > 0 && (
+              <div class="rp-possible">
+                <p class="rp-section-label">Possible matches</p>
+                <ul class="rp-alts rp-alts-inline">
+                  {candidates.map((c, i) => (
+                    <li
+                      key={`${c.source}-${i}`}
+                      class="rp-alt"
+                      title="Show this paper"
+                      onClick={() => {
+                        setSelected(i);
+                        setPicked(true);
+                      }}
+                    >
+                      <span class="rp-alt-conf">{Math.round(c.confidence * 100)}%</span>
+                      <span class="rp-alt-title">{c.title}</span>
+                      <span class="rp-alt-meta">{c.year ?? "—"}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
@@ -453,6 +487,7 @@ export function ReferenceView({ reference, onClose }: { reference: ParsedReferen
                     class={i === selected ? "rp-alt rp-alt-active" : "rp-alt"}
                     onClick={() => {
                       setSelected(i);
+                      setPicked(true);
                       setShowAlts(false);
                     }}
                   >

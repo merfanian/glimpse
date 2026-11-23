@@ -429,6 +429,15 @@
 .rp-alt-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--g-ink); }
 .rp-alt-meta { color: var(--g-ink-3); font-variant-numeric: tabular-nums; }
 
+/* "Possible matches" under a no-confident-match message */
+.rp-possible { margin: 0 18px 18px; }
+.rp-alts.rp-alts-inline {
+  max-height: none;
+  padding: 4px;
+  border: 1px solid var(--g-line);
+  border-radius: 10px;
+}
+
 /* ── Abstract view ────────────────────────────────────── */
 .rp-abstract-view { padding: 20px 0 0; }
 .rp-abstract-view > :not(.rp-ref) { margin-left: 18px; margin-right: 18px; }
