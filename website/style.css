@@ -352,6 +352,40 @@ h1 {
 .faq[open] summary::after { transform: translateY(-50%) rotate(45deg); }
 .faq p { margin: 0 0 20px; color: var(--ink-2); }
 
+/* Related tool (BibTeX Verifier) */
+.related { display: grid; grid-template-columns: 1fr 1.05fr; gap: 56px; align-items: center; }
+@media (max-width: 920px) { .related { grid-template-columns: 1fr; gap: 36px; } }
+.related .eyebrow { margin-bottom: 10px; }
+.related .section-title { display: flex; align-items: center; gap: 14px; }
+.related-icon { border-radius: 10px; flex-shrink: 0; }
+.related-lede { margin: 0 0 24px; color: var(--ink-2); font-size: 17px; }
+.related-lede em { color: #e5484d; font-style: italic; }
+.flow { list-style: none; margin: 0 0 28px; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; counter-reset: step; }
+@media (max-width: 600px) { .flow { grid-template-columns: 1fr; } }
+.flow li {
+  position: relative;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  font-size: 13.5px;
+  color: var(--ink-2);
+  counter-increment: step;
+}
+.flow li b { display: block; color: var(--ink); font-size: 15px; }
+.flow li b::before { content: counter(step) ". "; color: var(--accent); }
+.flow li.flow-bv { border-color: color-mix(in srgb, #5b8def 55%, var(--line)); }
+.flow li.flow-bv b::before { color: #5b8def; }
+.btn-verifier {
+  color: #fff;
+  background: linear-gradient(135deg, #6b9cf5, #3f6fd8);
+  box-shadow: 0 10px 24px -10px rgba(63, 111, 216, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.btn-verifier:hover { filter: brightness(1.07); }
+.related-shot { display: block; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-lg); border: 1px solid var(--line); transition: transform 0.2s ease; }
+.related-shot:hover { transform: translateY(-3px); }
+.related-shot img { display: block; width: 100%; }
+
 /* Final CTA */
 .final {
   padding: 88px 0;
